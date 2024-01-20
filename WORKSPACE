@@ -1,6 +1,19 @@
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
 
 http_archive(
+    name = "bazel_skylib",
+    sha256 = "cd55a062e763b9349921f0f5db8c3933288dc8ba4f76dd9416aac68acee3cb94",
+    urls = [
+        "https://mirror.bazel.build/github.com/bazelbuild/bazel-skylib/releases/download/1.5.0/bazel-skylib-1.5.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-skylib/releases/download/1.5.0/bazel-skylib-1.5.0.tar.gz",
+    ],
+)
+
+load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
+
+bazel_skylib_workspace()
+
+http_archive(
     name = "com_google_protobuf",
     sha256 = "dd513a79c7d7e45cbaeaf7655289f78fd6b806e52dbbd7018ef4e3cf5cff697a",
     strip_prefix = "protobuf-3.15.8",
@@ -83,66 +96,15 @@ load("@build_stack_rules_proto//go:deps.bzl", "go_grpc_library")
 
 go_grpc_library()
 
-load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies", "go_repository")
-
-go_repository(
-    name = "com_github_cespare_xxhash_v2",
-    importpath = "github.com/cespare/xxhash/v2",
-    sum = "h1:DC2CZ1Ep5Y4k3ZQ899DldepgrayRUGE6BBZ/cd9Cj44=",
-    version = "v2.2.0",
-)
-
-go_repository(
-    name = "com_github_dgryski_go_rendezvous",
-    importpath = "github.com/dgryski/go-rendezvous",
-    sum = "h1:lO4WD4F/rVNCu3HqELle0jiPLLBs70cWOduZpkS1E78=",
-    version = "v0.0.0-20200823014737-9f7001d12a5f",
-)
+load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
 
 gazelle_dependencies()
-
-go_repository(
-    name = "com_github_redis_go_redis_v9",
-    importpath = "github.com/redis/go-redis/v9",
-    sum = "h1:CuQcn5HIEeK7BgElubPP8CGtE0KakrnbBSTLjathl5o=",
-    version = "v9.0.5",
-)
 
 load("@io_bazel_rules_go//tests:grpc_repos.bzl", "grpc_dependencies")
 
 grpc_dependencies()
 
-go_repository(
-    name = "com_github_mitchellh_go_wordwrap",
-    importpath = "github.com/mitchellh/go-wordwrap",
-    sum = "h1:DpOJ2HYzCv8LZP15IdmG+YdwD2luVPHITV96TkirNBM=",
-    version = "v0.0.0-20150314170334-ad45545899c7",
-)
+load("//:deps.bzl", "go_dependencies")
 
-go_repository(
-    name = "com_github_mattn_go_runewidth",
-    importpath = "github.com/mattn/go-runewidth",
-    sum = "h1:UnlwIPBGaTZfPQ6T1IGzPI0EkYAQmT9fAEJ/poFC63o=",
-    version = "v0.0.2",
-)
-
-go_repository(
-    name = "com_github_nsf_termbox_go",
-    importpath = "github.com/nsf/termbox-go",
-    sum = "h1:x3S6kxmy49zXVVyhcnrFqxvNVCBPb2KZ9hV2RBdS840=",
-    version = "v0.0.0-20190121233118-02980233997d",
-)
-
-go_repository(
-    name = "com_github_gizak_termui",
-    importpath = "github.com/gizak/termui/v3",
-    sum = "h1:ZZmVDgwHl7gR7elfKf1xc4IudXZ5qqfDh4wExk4Iajc=",
-    version = "v3.1.0",
-)
-
-go_repository(
-    name = "com_github_go_redis_redis",
-    importpath = "github.com/go-redis/redis",
-    sum = "h1:x7dvutgTPxsHoeUboXlOp9fEUMdIRO4OJV5ly1LYE40=",
-    version = "v6.15.3",
-)
+# gazelle:repository_macro deps.bzl%go_dependencies
+go_dependencies()
