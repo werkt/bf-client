@@ -2,6 +2,7 @@ package client
 
 import (
   "context"
+  "time"
   redis "github.com/redis/go-redis/v9"
 )
 
@@ -14,6 +15,9 @@ func (r *UnifiedRedis) connect(host string) {
   cluster := redis.NewClusterClient(&redis.ClusterOptions{
       Addrs: []string{host},
       Password: "",
+      DialTimeout: time.Second,
+      ReadTimeout: time.Second,
+      WriteTimeout: time.Second,
   })
   if cluster.ClusterInfo(context.Background()).Err() != nil {
     cluster.Close()
@@ -21,6 +25,9 @@ func (r *UnifiedRedis) connect(host string) {
     r.client = redis.NewClient(&redis.Options{
       Addr: host,
       Password: "",
+      DialTimeout: time.Second,
+      ReadTimeout: time.Second,
+      WriteTimeout: time.Second,
     })
   } else {
     r.cluster = cluster
