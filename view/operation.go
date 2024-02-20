@@ -106,8 +106,15 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
       op.Text = err.Error()
       v.selectableFields = 0
     } else {
-      op.Text = renderExecuteOperationMetadata(em, v.selection)
-      v.selectableFields = 1
+      m, ok := v.a.Metadatas[v.name]
+      op.Text = ""
+      if ok {
+        op.Text += renderRequestMetadata(m, v.selection)
+        v.selectableFields = 3
+      } else {
+        v.selectableFields = 1
+      }
+      op.Text += renderExecuteOperationMetadata(em, v.selection)
       v.selectionActions = make([]func(*operationView) View, v.selectableFields)
       v.selectionActions[0] = func(ov *operationView) View { return NewAction(v.a, em.ActionDigest, ov) }
     }

@@ -3,13 +3,11 @@ package view
 import (
   "context"
   "fmt"
-  "strings"
 
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   bfpb "github.com/bazelbuild/bazel-buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
   "github.com/gizak/termui/v3/widgets"
-  "github.com/golang/protobuf/jsonpb"
   "github.com/golang/protobuf/ptypes"
   "github.com/hashicorp/golang-lru/v2"
   "github.com/werkt/bf-client/client"
@@ -30,10 +28,32 @@ type operationList struct {
   selected int
   v View
   field int
+  queues []*client.Queue
 }
 
 func NewOperationList(a *client.App, mode int, v View) *operationList {
   opcache, _ := lru.New[string, operation](60)
+  var queues []*client.Queue
+  if mode != 3 {
+    c := bfpb.NewOperationQueueClient(a.Conn)
+    status, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest {
+      InstanceName: "shard",
+    })
+    if err != nil {
+      panic(err)
+    }
+    var names []string
+    if mode == 1 {
+      names = append(names, status.Prequeue.Name)
+    } else {
+      for _, queue := range status.OperationQueue.Provisions {
+        names = append(names, queue.Name)
+      }
+    }
+    for _, name := range names {
+      queues = append(queues, client.NewQueue(context.Background(), a.Client, name))
+    }
+  }
   return &operationList {
     a: a,
     mode: mode,
@@ -41,76 +61,82 @@ func NewOperationList(a *client.App, mode int, v View) *operationList {
     opcache: opcache,
     field: 0,
     v: v,
+    queues: queues,
   }
 }
 
-func (v operationList) fetchPrequeued() []string {
-  client := v.a.Client
-  ops := make([]string, 0)
-  for _, entry := range client.LRange(context.Background(), "{Execution}:PreQueuedOperations", 0, 20).Val() {
-    ee := &bfpb.ExecuteEntry{}
-    err := jsonpb.Unmarshal(strings.NewReader(entry), ee)
-    if err != nil {
-      ops = append(ops, err.Error())
-    } else {
-      ops = append(ops, ee.OperationName)
+func (v operationList) fetchQueues(max int64, cb func(string) (*client.Operation, error)) []*client.Operation {
+  var ops []*client.Operation
+  for _, queue := range v.queues {
+    ops = append(ops, queue.Slice(context.Background(), v.a.Client, 0, max, cb)...)
+    if int64(len(ops)) >= max {
+      break
     }
   }
   return ops
 }
 
-func (v operationList) fetchQueued() []string {
-  client := v.a.Client
-  ops := make([]string, 0)
-  for _, entry := range client.LRange(context.Background(), "{Execution}:QueuedOperations", 0, 20).Val() {
-    qe := &bfpb.QueueEntry{}
-    err := jsonpb.Unmarshal(strings.NewReader(entry), qe)
-    if err != nil {
-      ops = append(ops, err.Error())
-    } else {
-      ops = append(ops, qe.ExecuteEntry.OperationName)
-    }
-  }
-  return ops
-}
-
-func (v operationList) fetchDispatched() []string {
-  client := v.a.Client
-  ops := make([]string, 0)
+func (v operationList) fetchDispatched() []*client.Operation {
+  var ops []*client.Operation
   var nextCursor, cursor uint64
   for nextCursor, cursor = 1, 0; len(ops) < 20 && nextCursor != 0; cursor = nextCursor {
     var opsPage []string
     var err error
-    opsPage, nextCursor, err = client.HScan(context.Background(), "DispatchedOperations", cursor, "*", 20).Result()
+    opsPage, nextCursor, err = v.a.Client.HScan(context.Background(), "DispatchedOperations", cursor, "*", 20).Result()
     if err != nil {
       panic(err)
     }
     for i, op := range opsPage {
       if i % 2 == 0 {
-        ops = append(ops, op)
+        ops = append(ops, &client.Operation { Name: op })
       }
+    }
+  }
+  c := longrunning.NewOperationsClient(v.a.Conn)
+  for _, op := range ops {
+    if _, ok := v.a.Metadatas[op.Name]; !ok {
+      v.a.Fetches++
+      o, err := c.GetOperation(context.Background(), &longrunning.GetOperationRequest {
+        Name: op.Name,
+      })
+      if err != nil {
+        continue
+      }
+      op.Metadata = getRequestMetadata(o)
+    }
+    if v.a.Fetches > 10 {
+      break
     }
   }
   return ops
 }
 
-func (v operationList) fetch() []string {
+func (v operationList) queuesLength() int64 {
+  var sum int64 = 0
+  for _, queue := range v.queues {
+    l, err := queue.Length(context.Background(), v.a.Client)
+    if err != nil {
+      panic(err)
+    }
+    sum += int64(l)
+  }
+  return sum
+}
+
+func (v operationList) fetch() []*client.Operation {
   switch v.mode {
-  case 1: return v.fetchPrequeued()
-  case 2: return v.fetchQueued()
+  case 1: return v.fetchQueues(20, client.ParsePrequeueName)
+  case 2: return v.fetchQueues(20, client.ParseQueueName)
   case 3: return v.fetchDispatched()
   default:
-    return make([]string, 0)
+    return make([]*client.Operation, 0)
   }
 }
 
 func (v operationList) length() int64 {
   client := v.a.Client
   switch v.selected {
-  case 1:
-    return client.LLen(context.Background(), "{Execution}:PreQueuedOperations").Val()
-  case 2:
-    return client.LLen(context.Background(), "{Execution}:QueuedOperations").Val()
+  case 1, 2: return v.queuesLength()
   case 3:
     length := client.HLen(context.Background(), "DispatchedOperations").Val()
     return length
@@ -152,38 +178,29 @@ func (v *operationList) Handle(e ui.Event) View {
 
 func (v *operationList) Update() {
   v.a.Fetches++
-  v.ops = v.fetch()
-  c := longrunning.NewOperationsClient(v.a.Conn)
+  ops := v.fetch()
 
-  for _, op := range v.ops {
-    if _, ok := v.a.Ops[op]; !ok {
-      v.a.Fetches++
-      o, err := c.GetOperation(context.Background(), &longrunning.GetOperationRequest {
-        Name: op,
-      })
-      if err != nil {
-        continue
-      }
-      m := getRequestMetadata(o)
-      v.opcache.Add(op, operation {
-        build: m.CorrelatedInvocationsId,
-        target: m.TargetId,
-        mnemonic: m.ActionMnemonic,
-      })
-      v.a.Ops[op] = o
+  v.ops = make([]string, 0)
+  for _, op := range ops {
+    v.ops = append(v.ops, op.Name)
+    if _, ok := v.a.Ops[op.Name]; !ok {
+      m := op.Metadata
       if m != nil {
-        v.a.Metadatas[op] = m
+        v.opcache.Add(op.Name, operation {
+          build: m.CorrelatedInvocationsId,
+          target: m.TargetId,
+          mnemonic: m.ActionMnemonic,
+        })
+        v.a.Ops[op.Name] = nil
+        v.a.Metadatas[op.Name] = op.Metadata
         var opInvocations []string
         var ok bool
         if opInvocations, ok = v.a.Invocations[m.ToolInvocationId]; !ok {
           opInvocations = make([]string, 1)
           v.a.Invocations[m.ToolInvocationId] = opInvocations
         }
-        v.a.Invocations[m.ToolInvocationId] = append(opInvocations, op)
+        v.a.Invocations[m.ToolInvocationId] = append(opInvocations, op.Name)
       }
-    }
-    if v.a.Fetches > 10 {
-      break
     }
   }
 }

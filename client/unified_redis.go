@@ -35,6 +35,13 @@ func (r *UnifiedRedis) connect(host string) {
   }
 }
 
+func (r *UnifiedRedis) ZCard(ctx context.Context, key string) *redis.IntCmd {
+  if r.client != nil {
+    return r.client.ZCard(ctx, key)
+  }
+  return r.cluster.ZCard(ctx, key)
+}
+
 func (r *UnifiedRedis) LLen(ctx context.Context, key string) *redis.IntCmd {
   if r.client != nil {
     return r.client.LLen(ctx, key)
@@ -47,6 +54,13 @@ func (r *UnifiedRedis) HLen(ctx context.Context, key string) *redis.IntCmd {
     return r.client.HLen(ctx, key)
   }
   return r.cluster.HLen(ctx, key)
+}
+
+func (r *UnifiedRedis) ZRange(ctx context.Context, key string, start, stop int64) *redis.StringSliceCmd {
+  if r.client != nil {
+    return r.client.ZRange(ctx, key, start, stop)
+  }
+  return r.cluster.ZRange(ctx, key, start, stop)
 }
 
 func (r *UnifiedRedis) LRange(ctx context.Context, key string, start, stop int64) *redis.StringSliceCmd {
@@ -63,3 +77,9 @@ func (r *UnifiedRedis) HScan(ctx context.Context, key string, cursor uint64, mat
   return r.cluster.HScan(ctx, key, cursor, match, count)
 }
 
+func (r *UnifiedRedis) ClusterShards(ctx context.Context) *redis.ClusterShardsCmd {
+  if r.client != nil {
+    return r.client.ClusterShards(ctx)
+  }
+  return r.cluster.ClusterShards(ctx)
+}

@@ -17,7 +17,7 @@ type App struct {
   ReapiHost string
   CA string
   Done bool
-  Client UnifiedRedis
+  Client *UnifiedRedis
   Conn *grpc.ClientConn
   workerConns map[string]*grpc.ClientConn
   Ops map[string]*longrunning.Operation
@@ -36,6 +36,7 @@ func NewApp(redisHost string, reapiHost string, ca string) *App {
     Metadatas: make(map[string]*reapi.RequestMetadata),
     Invocations: make(map[string][]string),
     workerConns: make(map[string]*grpc.ClientConn),
+    Client: &UnifiedRedis{},
   }
 }
 

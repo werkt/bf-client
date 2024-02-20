@@ -82,7 +82,7 @@ func (v *Queue) Handle(e ui.Event) View {
 func (v *Queue) Update() {
   s := &v.s
   c := bfpb.NewOperationQueueClient(v.a.Conn)
-  var status *bfpb.BackplaneStatus
+  var st *bfpb.BackplaneStatus
   if v.selected == 0 {
     if v.selected == 0 && s.workers != nil {
       var wg sync.WaitGroup
@@ -93,14 +93,18 @@ func (v *Queue) Update() {
       wg.Wait()
     }
   }
-  status, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest {
+  st, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest {
     InstanceName: "shard",
   })
   if err == nil {
-    s.status = *status
-    s.workers = status.ActiveWorkers;
+    s.status = *st
+    s.workers = st.ActiveWorkers;
   } else {
-    panic(err)
+    st, ok := status.FromError(err)
+    if !ok || (st.Code() != codes.Unknown && st.Code() != codes.Unavailable) {
+      panic(err)
+    }
+    return
   }
   now := time.Now()
   if s.last.Add(time.Second / 10).Before(now) {
@@ -124,7 +128,7 @@ func (v *Queue) Update() {
     s.ticks = 0
     s.last = now
   }
-  if status != nil {
+  if st != nil {
     s.prequeueSum += float64(s.status.Prequeue.Size)
     for _, provision := range s.status.OperationQueue.Provisions {
       for _, of := range provision.InternalSizes {
@@ -267,7 +271,7 @@ func renderWorkersInfo(s *stats) ui.Drawable {
   meter := client.NewList()
   meter.SelectedRow = -1
   meter.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
-  meter.SetRect(19, 4, 180, plen + 7)
+  meter.SetRect(19, 4, 180, plen + 6)
   meter.Title = "Workers";
 
   wl := 0
