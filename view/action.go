@@ -27,11 +27,9 @@ func NewAction(a *client.App, d *reapi.Digest, v View) View {
 
 func (v *actionView) Handle(e ui.Event) View {
   switch e.ID {
-  case "j", "<Down>":
+  case "j", "<Down>", "k", "<Up>":
+    // same movement up or down for 2 elements
     v.selection++
-    v.selection %= 2
-  case "k", "<Up>":
-    v.selection--
     v.selection %= 2
   case "<Escape>", "q", "<C-c>":
     ui.Clear()

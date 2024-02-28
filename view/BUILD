@@ -10,6 +10,7 @@ go_library(
         "operation.go",
         "operation_list.go",
         "view.go",
+        "worker.go",
     ],
     importpath = "github.com/werkt/bf-client/view",
     visibility = ["//visibility:public"],

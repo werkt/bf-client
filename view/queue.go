@@ -48,9 +48,14 @@ type Queue struct {
   a *client.App
   selected int
   s stats
+  h int
+  meter *client.List
 }
 
 func NewQueue(a *client.App, selected int) *Queue {
+  _, h := ui.TerminalDimensions()
+  meter := client.NewList()
+  meter.SelectedRow = -1
   return &Queue {
     a: a,
     s: stats {
@@ -59,6 +64,8 @@ func NewQueue(a *client.App, selected int) *Queue {
       mutex: &sync.Mutex{},
     },
     selected: 3,
+    meter: meter,
+    h: h,
   }
 }
 
@@ -67,14 +74,35 @@ func (v *Queue) Handle(e ui.Event) View {
   case "<Escape>", "q", "<C-c>":
     v.a.Done = true
   case "j", "<Down>":
-    v.selected++
-    v.selected %= 4
+    if v.meter.SelectedRow == -1 {
+      v.selected++
+      v.selected %= 4
+    } else {
+      v.meter.ScrollDown()
+    }
   case "k", "<Up>":
-    v.selected += 3
-    v.selected %= 4
+    if v.meter.SelectedRow == -1 {
+      v.selected += 3
+      v.selected %= 4
+    } else {
+      v.meter.ScrollUp()
+    }
+  case "l", "h", "<Right>", "<Left>":
+    if v.selected == 0 {
+      if v.meter.SelectedRow == -1 {
+        v.meter.SelectedRow = 0
+      } else {
+        v.meter.SelectedRow = -1
+      }
+    }
   case "<Enter>":
-    ui.Clear()
-    return NewOperationList(v.a, v.selected, v)
+    if v.selected == 0 {
+      // get the worker out of the list
+      return NewWorker(v.a, v.meter.Rows[v.meter.SelectedRow].(Worker).w, v)
+    } else if v.meter.SelectedRow == -1 {
+      ui.Clear()
+      return NewOperationList(v.a, v.selected, v)
+    }
   }
   return v
 }
@@ -161,7 +189,7 @@ func (v Queue) Render() []ui.Drawable {
 
   var info ui.Drawable
   if v.selected == 0 {
-    info = renderWorkersInfo(&s)
+    info = renderWorkersInfo(&s, v.meter, v.h)
   } else {
     plot := widgets.NewPlot()
     plot.Data = make([][]float64, 1)
@@ -261,17 +289,24 @@ func (s *workerSorter) Swap(i, j int) {
 
 // Less is part of sort.Interface. It is implemented by calling the "by" closure in the sorter.
 func (s *workerSorter) Less(i, j int) bool {
-  return s.by(&s.workers[i], &s.workers[j])
+  return !s.by(&s.workers[i], &s.workers[j])
+}
+
+type Worker struct {
+  w string
+  row string
+}
+
+func (w Worker) String() string {
+  return w.row
 }
 
 // List needs work on draw, flip for only background, etc
-func renderWorkersInfo(s *stats) ui.Drawable {
+func renderWorkersInfo(s *stats, meter *client.List, h int) ui.Drawable {
   plen := len(s.workers)
 
-  meter := client.NewList()
-  meter.SelectedRow = -1
   meter.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
-  meter.SetRect(19, 4, 180, plen + 6)
+  meter.SetRect(19, 4, 180, h - 6)
   meter.Title = "Workers";
 
   wl := 0
@@ -329,7 +364,7 @@ func renderWorkersInfo(s *stats) ui.Drawable {
   return meter
 }
 
-func renderWorkerRow(r *profileResult, w string, wl int) nodeValue {
+func renderWorkerRow(r *profileResult, w string, wl int) Worker {
   var profile *bfpb.WorkerProfileMessage
   if r == nil {
     r = &profileResult {profile: &bfpb.WorkerProfileMessage{}, stale: 1, message: "uninitialized"}
@@ -369,7 +404,10 @@ func renderWorkerRow(r *profileResult, w string, wl int) nodeValue {
       row += ", " + r.message
     }
   }
-  return nodeValue(row)
+  return Worker {
+    w: w,
+    row: row,
+  }
 }
 
 func formatTime(t time.Time) string {

@@ -51,7 +51,7 @@ func (v *operationView) Handle(e ui.Event) View {
       v.selection = 0
     }
   case "k", "<Up>":
-    v.selection--
+    v.selection += v.selectableFields - 1
     if v.selectableFields > 0 {
       v.selection %= v.selectableFields
     } else {
