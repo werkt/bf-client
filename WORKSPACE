@@ -59,10 +59,10 @@ http_archive(
 http_archive(
     name = "buildfarm",
     build_file = "@//:BUILD.buildfarm",
-    sha256 = "a9d54f53c74accb898c47f8cb80f09a2afe1fa388e2e5e4edad738f1cd258e80",
-    strip_prefix = "bazel-buildfarm-2.9.0/src/main/protobuf/build/buildfarm/v1test/",
+    sha256 = "4b698b19d58c5dfd36f20d5e4d6de1597f2265bbb3be4955d7d28c50dd398977",
+    strip_prefix = "bazel-buildfarm-d1e813c90f9b75a568054cbc2f68cc34fd24405b/src/main/protobuf/build/buildfarm/v1test/",
     urls = [
-        "https://github.com/bazelbuild/bazel-buildfarm/archive/refs/tags/2.9.0.tar.gz",
+        "https://github.com/bazelbuild/bazel-buildfarm/archive/d1e813c90f9b75a568054cbc2f68cc34fd24405b.zip",
     ],
 )
 

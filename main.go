@@ -72,7 +72,7 @@ func main() {
 
   var ca string
   if len(os.Args) > 3 {
-    ca = os.Args[2]
+    ca = os.Args[3]
   }
 
   if !strings.Contains(redisHost, ":") {

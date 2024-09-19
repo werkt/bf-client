@@ -8,6 +8,8 @@ import (
   ui "github.com/gizak/termui/v3"
   "github.com/werkt/bf-client/client"
   "google.golang.org/genproto/googleapis/longrunning"
+  "google.golang.org/grpc/codes"
+  "google.golang.org/grpc/status"
 )
 
 type worker struct {
@@ -63,7 +65,11 @@ func (v *worker) cancelOperation() {
       Name: name,
     })
     if err != nil {
-      panic(err)
+      st, ok := status.FromError(err)
+      if !ok || st.Code() != codes.Unknown {
+        panic(err)
+      }
+      // buildfarm spits out an unknown for already-done
     }
   }
 }

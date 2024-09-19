@@ -17,12 +17,6 @@ import (
   "google.golang.org/grpc/status"
 )
 
-type nodeValue string
-
-func (nv nodeValue) String() string {
-  return string(nv)
-}
-
 type profileResult struct {
   profile *bfpb.WorkerProfileMessage
   stale int
@@ -44,29 +38,67 @@ type stats struct {
   mutex *sync.Mutex
 }
 
+type numValue struct {
+  fmt string
+  value int
+  mode int
+  parent *numValue
+}
+
+func (nv numValue) String() string {
+  return fmt.Sprintf(nv.fmt, nv.value)
+}
+
 type Queue struct {
   a *client.App
-  selected int
+  focused bool
   s stats
   h int
   meter *client.List
+  stats *client.Tree
+  workers numValue
+  prequeueNode client.TreeNode
+  prequeue numValue
+  queueNode client.TreeNode
+  queue numValue
+  dispatched numValue
+}
+
+func statNode(nv *numValue) *client.TreeNode {
+  return &client.TreeNode{ Value: nv, }
 }
 
 func NewQueue(a *client.App, selected int) *Queue {
   _, h := ui.TerminalDimensions()
   meter := client.NewList()
   meter.SelectedRow = -1
-  return &Queue {
+  q := &Queue {
     a: a,
     s: stats {
       profiles: make(map[string]*profileResult),
       last: time.Now(),
       mutex: &sync.Mutex{},
     },
-    selected: 3,
     meter: meter,
     h: h,
+    stats: client.NewTree(),
+    workers: numValue{ fmt: "Workers: %v", },
+    prequeue: numValue{ fmt: "Prequeue: %v", mode: 1 },
+    queue: numValue{ fmt: "Queue: %v", mode: 2 },
+    dispatched: numValue{ fmt: "Dispatched: %v", mode: 3 },
   }
+  q.stats.Focused = true
+  q.stats.SelectedRow = selected
+  q.stats.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
+  q.queueNode.Value = &q.queue
+  q.prequeueNode.Value = &q.prequeue
+  q.stats.SetNodes([]*client.TreeNode{
+    statNode(&q.workers),
+    &q.prequeueNode,
+    &q.queueNode,
+    statNode(&q.dispatched),
+  })
+  return q
 }
 
 func (v *Queue) Handle(e ui.Event) View {
@@ -74,21 +106,40 @@ func (v *Queue) Handle(e ui.Event) View {
   case "<Escape>", "q", "<C-c>":
     v.a.Done = true
   case "j", "<Down>":
-    if v.meter.SelectedRow == -1 {
-      v.selected++
-      v.selected %= 4
-    } else {
+    if v.stats.Focused {
+      v.stats.ScrollDown()
+    }
+    if v.meter.SelectedRow != -1 {
       v.meter.ScrollDown()
     }
   case "k", "<Up>":
-    if v.meter.SelectedRow == -1 {
-      v.selected += 3
-      v.selected %= 4
+    if v.stats.Focused {
+      v.stats.ScrollUp()
     } else {
       v.meter.ScrollUp()
     }
-  case "l", "h", "<Right>", "<Left>":
-    if v.selected == 0 {
+  case "h", "<Left>":
+    if (v.stats.Focused) {
+      v.stats.Collapse()
+      ui.Clear()
+    } else {
+      v.stats.Focused = true
+    }
+    if v.stats.SelectedRow == 0 {
+      if v.meter.SelectedRow == -1 {
+        v.meter.SelectedRow = 0
+      } else {
+        v.meter.SelectedRow = -1
+      }
+    }
+  case "l", "<Right>":
+    if v.stats.SelectedRow != 0 {
+      if (v.stats.Focused) {
+        v.stats.Expand()
+        ui.Clear()
+      }
+    } else {
+      v.stats.Focused = v.meter.SelectedRow != -1
       if v.meter.SelectedRow == -1 {
         v.meter.SelectedRow = 0
       } else {
@@ -96,23 +147,60 @@ func (v *Queue) Handle(e ui.Event) View {
       }
     }
   case "<Enter>":
-    if v.selected == 0 {
+    if v.meter.SelectedRow >= 0 {
       // get the worker out of the list
       return NewWorker(v.a, v.meter.Rows[v.meter.SelectedRow].(Worker).w, v)
-    } else if v.meter.SelectedRow == -1 {
+    } else {
       ui.Clear()
-      return NewOperationList(v.a, v.selected, v)
+      return NewOperationList(v.a, v.stats.SelectedNode().Value.(*numValue).mode, v)
     }
+  /*
+  case "S":
+    return NewServerTest(v.a, v)
+  */
   }
   return v
+}
+
+func updateProvisionNode(node *client.TreeNode, provision *bfpb.QueueStatus) {
+  size := int64(0)
+  n := len(provision.InternalSizes)
+  if len(node.Nodes) != n {
+    node.Nodes = make([]*client.TreeNode, n)
+    for i := 0; i < n; i++ {
+      node.Nodes[i] = statNode(&numValue{ fmt: "%v", parent: node.Value.(*numValue) })
+    }
+  }
+  for i, of := range provision.InternalSizes {
+    nodeNumValue := node.Nodes[i].Value.(*numValue)
+    nodeNumValue.value = int(of)
+    size += of
+  }
+  nodeNumValue := node.Value.(*numValue)
+  nodeNumValue.value = int(size)
+}
+
+func (v *Queue) updateProvisionNodes(provisions []*bfpb.QueueStatus) {
+  if len(v.queueNode.Nodes) != len(provisions) {
+    for _, provision := range provisions {
+      node := &client.TreeNode{
+        Value: &numValue{ fmt: provision.Name + ": %v", parent: &v.queue },
+        Nodes: make([]*client.TreeNode, 0),
+      }
+      v.queueNode.Nodes = append(v.queueNode.Nodes, node)
+    }
+  }
+  for i, provision := range provisions {
+    updateProvisionNode(v.queueNode.Nodes[i], provision)
+  }
 }
 
 func (v *Queue) Update() {
   s := &v.s
   c := bfpb.NewOperationQueueClient(v.a.Conn)
   var st *bfpb.BackplaneStatus
-  if v.selected == 0 {
-    if v.selected == 0 && s.workers != nil {
+  if v.stats.SelectedRow == 0 {
+    if s.workers != nil {
       var wg sync.WaitGroup
       for _, worker := range s.workers {
         wg.Add(1)
@@ -134,6 +222,10 @@ func (v *Queue) Update() {
     }
     return
   }
+  v.workers.value = len(s.workers)
+  v.prequeue.value = int(s.status.Prequeue.Size)
+  v.queue.value = int(s.status.OperationQueue.Size)
+  v.dispatched.value = int(s.status.DispatchedSize)
   now := time.Now()
   if s.last.Add(time.Second / 10).Before(now) {
     if s.prequeueData.Len() > 60 {
@@ -158,14 +250,44 @@ func (v *Queue) Update() {
   }
   if st != nil {
     s.prequeueSum += float64(s.status.Prequeue.Size)
-    for _, provision := range s.status.OperationQueue.Provisions {
-      for _, of := range provision.InternalSizes {
-        s.queueSum += float64(of)
-      }
-    }
+    s.queueSum = float64(s.status.OperationQueue.Size)
     s.dispatchedSum += float64(s.status.DispatchedSize)
   }
+  updateProvisionNode(&v.prequeueNode, s.status.Prequeue)
+  v.updateProvisionNodes(s.status.OperationQueue.Provisions)
   s.ticks++
+}
+
+type dims struct {
+  width int
+  height int
+}
+
+func nodeDimensions(node *client.TreeNode, level int) dims {
+  d := dims{ len(node.Value.String()) + level * 2, 1 }
+  if node.Expanded {
+    for _, n := range node.Nodes {
+      nd := nodeDimensions(n, level+1)
+      if nd.width > d.width {
+        d.width = nd.width
+      }
+      d.height += nd.height
+    }
+  }
+  return d
+}
+
+func treeDimensions(t *client.Tree) dims {
+  d := dims{ 0, 0 }
+  t.Walk(func(n *client.TreeNode) int {
+    nd := nodeDimensions(n, 0)
+    if nd.width > d.width {
+      d.width = nd.width
+    }
+    d.height += nd.height
+    return -1
+  })
+  return d
 }
 
 func (v Queue) Render() []ui.Drawable {
@@ -174,27 +296,24 @@ func (v Queue) Render() []ui.Drawable {
   p.Text = v.a.RedisHost + "\n" + v.a.ReapiHost + "\n" + formatTime(s.last)
   p.SetRect(0, 0, 80, 5)
 
-  stats := widgets.NewParagraph()
-  stats.Text = selectStat(v.selected == 0, fmt.Sprintf("Workers: %v\n", len(s.workers)))
-  stats.Text += selectStat(v.selected == 1, fmt.Sprintf("Prequeue: %v\n", s.status.Prequeue.Size))
-  queueSize := int64(0)
-  for _, provision := range s.status.OperationQueue.Provisions {
-    for _, of := range provision.InternalSizes {
-      queueSize += of
-    }
-  }
-  stats.Text += selectStat(v.selected == 2, fmt.Sprintf("Queue: %v\n", queueSize))
-  stats.Text += selectStat(v.selected == 3, fmt.Sprintf("Dispatched: %v\n", s.status.DispatchedSize))
-  stats.SetRect(0, 4, 20, 10)
+  d := treeDimensions(v.stats)
+  d.width += 4
+  d.height += 6
+  v.stats.SetRect(0, 4, d.width, d.height)
 
   var info ui.Drawable
-  if v.selected == 0 {
-    info = renderWorkersInfo(&s, v.meter, v.h)
+  if v.stats.SelectedRow == 0 {
+    info = renderWorkersInfo(&s, v.meter, d.width, v.h)
   } else {
     plot := widgets.NewPlot()
     plot.Data = make([][]float64, 1)
+    var chartValue *numValue
+    for chartValue, _ = v.stats.SelectedNode().Value.(*numValue);
+        chartValue.parent != nil;
+        chartValue = chartValue.parent { }
+    mode := chartValue.mode
     var container list.List
-    switch v.selected {
+    switch mode {
     case 1:
       plot.Title = "Prequeue"
       plot.LineColors[0] = ui.ColorRed
@@ -217,7 +336,7 @@ func (v Queue) Render() []ui.Drawable {
     for ; n < 60; n++ {
       plot.Data[0][59 - n] = float64(0)
     }
-    plot.SetRect(19, 4, 90, 30)
+    plot.SetRect(d.width, 4, d.width + 71, 30)
     plot.AxesColor = ui.ColorWhite
     plot.Marker = widgets.MarkerBraille
     plot.PlotType = widgets.ScatterPlot
@@ -225,7 +344,7 @@ func (v Queue) Render() []ui.Drawable {
     info = plot
   }
 
-  return []ui.Drawable { p, stats, info }
+  return []ui.Drawable{ p, v.stats, info }
 }
 
 func fetchProfile(v *Queue, worker string, conn *grpc.ClientConn, wg *sync.WaitGroup) {
@@ -302,11 +421,11 @@ func (w Worker) String() string {
 }
 
 // List needs work on draw, flip for only background, etc
-func renderWorkersInfo(s *stats, meter *client.List, h int) ui.Drawable {
+func renderWorkersInfo(s *stats, meter *client.List, x int, h int) ui.Drawable {
   plen := len(s.workers)
 
   meter.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
-  meter.SetRect(19, 4, 180, h - 6)
+  meter.SetRect(x, 4, x + 161, h - 6)
   meter.Title = "Workers";
 
   wl := 0

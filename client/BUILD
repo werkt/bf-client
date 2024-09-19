@@ -5,10 +5,12 @@ go_library(
     srcs = [
         "app.go",
         "bytestream.go",
+        "cas.go",
         "digest.go",
         "hashtag.go",
         "list.go",
         "queue.go",
+        "tree.go",
         "unified_redis.go",
     ],
     importpath = "github.com/werkt/bf-client/client",

@@ -36,4 +36,3 @@ func Expect(c *grpc.ClientConn, d *reapi.Digest, m proto.Message) error {
   }
   return io.EOF
 }
-

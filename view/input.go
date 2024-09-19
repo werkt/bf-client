@@ -9,6 +9,12 @@ import (
   "google.golang.org/grpc"
 )
 
+type nodeValue string
+
+func (nv nodeValue) String() string {
+  return string(nv)
+}
+
 type inputView struct {
   a *client.App
   d *reapi.Digest
@@ -33,13 +39,7 @@ func (v *inputView) Update() {
   }
 
   v.i = make(map[string]*reapi.Directory)
-  var q deque.Deque[*reapi.Digest]
-  q.PushFront(v.d)
-  for q.Len() != 0 {
-    d := q.PopBack()
-    v.i[client.DigestString(d)] = nil
-    fetchDirectory(d, &q, v.i, v.a.Conn)
-  }
+  client.FetchTree(v.d, v.i, v.a.Conn)
 
   t := widgets.NewTree()
   t.Title = "Directory: " + client.DigestString(v.d)
@@ -103,6 +103,16 @@ func (v inputView) Render() []ui.Drawable {
     r = v.t
   }
   return []ui.Drawable { r }
+}
+
+func fetchTreeRecursive(d *reapi.Digest, i map[string]*reapi.Directory, conn *grpc.ClientConn) {
+  var q deque.Deque[*reapi.Digest]
+  q.PushFront(d)
+  for q.Len() != 0 {
+    d := q.PopBack()
+    i[client.DigestString(d)] = nil
+    fetchDirectory(d, &q, i, conn)
+  }
 }
 
 func fetchDirectory(d *reapi.Digest, q *deque.Deque[*reapi.Digest], i map[string]*reapi.Directory, conn *grpc.ClientConn) {

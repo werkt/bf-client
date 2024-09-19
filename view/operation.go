@@ -99,8 +99,6 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
   m := v.op.Metadata
   em := &reapi.ExecuteOperationMetadata{}
   qm := &bfpb.QueuedOperationMetadata{}
-  xm := &bfpb.ExecutingOperationMetadata{}
-  cm := &bfpb.CompletedOperationMetadata{}
   if ptypes.Is(m, em) {
     if err := ptypes.UnmarshalAny(m, em); err != nil {
       op.Text = err.Error()
@@ -116,7 +114,13 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
       }
       op.Text += renderExecuteOperationMetadata(em, v.selection)
       v.selectionActions = make([]func(*operationView) View, v.selectableFields)
-      v.selectionActions[0] = func(ov *operationView) View { return NewAction(v.a, em.ActionDigest, ov) }
+      actionIndex := 0
+      if ok {
+        v.selectionActions[0] = createInvocationView
+        v.selectionActions[1] = createCorrelatedView
+        actionIndex = 2
+      }
+      v.selectionActions[actionIndex] = func(ov *operationView) View { return NewAction(v.a, em.ActionDigest, ov) }
     }
   } else if ptypes.Is(m, qm) {
     if err := ptypes.UnmarshalAny(m, qm); err != nil {
@@ -128,44 +132,12 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
       op.Text += fmt.Sprintf("queued operation: %s\n", renderDigest(qm.QueuedOperationDigest, v.selection == 3))
       v.selectableFields = 4
       v.selectionActions = make([]func(*operationView) View, v.selectableFields)
-      v.selectionActions[0] = createCorrelatedView
-      v.selectionActions[1] = createInvocationView
+      v.selectionActions[0] = createInvocationView
+      v.selectionActions[1] = createCorrelatedView
       v.selectionActions[2] = func(ov *operationView) View { return NewAction(v.a, qm.ExecuteOperationMetadata.ActionDigest, ov) }
-      v.selectionActions[3] = func (ov *operationView) View {
+      v.selectionActions[3] = func(ov *operationView) View {
         return createQueuedOperationView(ov, qm.QueuedOperationDigest)
       }
-    }
-  } else if ptypes.Is(m, xm) {
-    if err := ptypes.UnmarshalAny(m, xm); err != nil {
-      op.Text = err.Error()
-      v.selectableFields = 0
-    } else {
-      op.Text = renderRequestMetadata(xm.RequestMetadata, v.selection)
-      op.Text += renderExecuteOperationMetadata(xm.ExecuteOperationMetadata, v.selection)
-      t := time.Unix(xm.StartedAt / 1000, (xm.StartedAt % 1000) * 1000000)
-      op.Text += fmt.Sprintf("started at: %s, running for %s\n", formatTime(t), time.Now().Sub(t).String())
-      op.Text += fmt.Sprintf("executing on: %s\n", boldIfSelected(xm.ExecutingOn, v.selection == 3))
-      v.selectableFields = 4
-      v.selectionActions = make([]func(*operationView) View, v.selectableFields)
-      v.selectionActions[0] = createCorrelatedView
-      v.selectionActions[1] = createInvocationView
-      v.selectionActions[2] = func(ov *operationView) View { return NewAction(v.a, xm.ExecuteOperationMetadata.ActionDigest, ov); }
-      v.selectionActions[3] = func (ov *operationView) View {
-        return createWorkerView(ov, xm.ExecutingOn)
-      }
-    }
-  } else if ptypes.Is(m, cm) {
-    if err := ptypes.UnmarshalAny(m, cm); err != nil {
-      op.Text = err.Error()
-      v.selectableFields = 0
-    } else {
-      op.Text = renderRequestMetadata(cm.RequestMetadata, v.selection)
-      op.Text += renderExecuteOperationMetadata(cm.ExecuteOperationMetadata, v.selection)
-      v.selectableFields = 3
-      v.selectionActions = make([]func(*operationView) View, v.selectableFields)
-      v.selectionActions[0] = createCorrelatedView
-      v.selectionActions[1] = createInvocationView
-      v.selectionActions[2] = func(ov *operationView) View { return NewAction(v.a, cm.ExecuteOperationMetadata.ActionDigest, ov); }
     }
   } else {
     op.Text = proto.MarshalTextString(v.op)
@@ -185,7 +157,7 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
         ex := renderExecuteResponse(er, v.selection)
         op.Text += ex.text
         selectableFields := v.selectableFields
-        v.selectableFields = ex.fields
+        v.selectableFields += ex.fields
         selectionActions := v.selectionActions
         v.selectionActions = make([]func(*operationView) View, v.selectableFields)
         for i := 0; i < selectableFields; i++ {
@@ -207,7 +179,16 @@ type executeText struct {
 }
 
 func renderExecuteResponse(er *reapi.ExecuteResponse, selection int) executeText {
-  ex := renderActionResult(er.Result, selection)
+  var ex executeText
+  if er.Result != nil {
+    ex = renderActionResult(er.Result, selection)
+  } else {
+    ex = executeText {
+      text: "nil action result\n",
+      fields: 0,
+      actions: list.New(),
+    }
+  }
   text := ex.text
   text += proto.MarshalTextString(er.Status)
   text += fmt.Sprintf("served from cache: %v\n", er.CachedResult)
@@ -236,7 +217,7 @@ func renderRequestMetadata(rm *reapi.RequestMetadata, selection int) string {
 
 func renderActionResult(ar *reapi.ActionResult, selection int) executeText {
   text := fmt.Sprintf("exit code: %d\n", ar.ExitCode)
-  base := 3
+  base := 0
   actions := list.New()
   if len(ar.StderrRaw) > 0 || (ar.StdoutDigest != nil && ar.StdoutDigest.SizeBytes > 0) {
     text += fmt.Sprintf("stdout: %s%s\n", renderDigest(ar.StdoutDigest, selection == 3), renderInline(len(ar.StdoutRaw)))
@@ -261,8 +242,9 @@ func renderActionResult(ar *reapi.ActionResult, selection int) executeText {
     text += fmt.Sprintf("directory: %s (%s)\n", od.Path, renderDigest(od.TreeDigest, selection == base + i))
     actions.PushBack(func (v *operationView) View { return outputDirectoryView(v, od.TreeDigest, od.Path) })
   }
-  fields := base + len(ar.OutputDirectories)
-  text += renderExecutionMetadata(ar.ExecutionMetadata)
+  base += len(ar.OutputDirectories)
+  text += renderExecutedActionMetadata(ar.ExecutionMetadata, selection == base)
+  fields := base + 1
   return executeText {
     text: text,
     fields: fields,
@@ -270,62 +252,111 @@ func renderActionResult(ar *reapi.ActionResult, selection int) executeText {
   }
 }
 
-func renderExecutionMetadata(em *reapi.ExecutedActionMetadata) string {
-  text := fmt.Sprintf("worker: %s\n", em.Worker)
+func renderExecutedActionMetadata(em *reapi.ExecutedActionMetadata, workerSelected bool) string {
+  text := ""
+  if len(em.Worker) != 0 {
+    text = fmt.Sprintf("worker: %s\n", boldIfSelected(em.Worker, workerSelected))
+  }
   var qt, wst, wct, ifst, ifct, est, ect, oust, ouct time.Time
   var err error
   if qt, err = ptypes.Timestamp(em.QueuedTimestamp); err != nil {
     text += err.Error() + "\n"
     return text
   }
-  if wst, err = ptypes.Timestamp(em.WorkerStartTimestamp); err != nil {
-    text += err.Error() + "\n"
-    return text
+  if em.WorkerStartTimestamp != nil {
+    if wst, err = ptypes.Timestamp(em.WorkerStartTimestamp); err != nil {
+      text += err.Error() + "\n"
+      return text
+    }
   }
-  if wct, err = ptypes.Timestamp(em.WorkerCompletedTimestamp); err != nil {
-    text += err.Error() + "\n"
-    return text
+  if em.WorkerCompletedTimestamp != nil {
+    if wct, err = ptypes.Timestamp(em.WorkerCompletedTimestamp); err != nil {
+      text += err.Error() + "\n"
+      return text
+    }
   }
-  if ifst, err = ptypes.Timestamp(em.InputFetchStartTimestamp); err != nil {
-    text += err.Error() + "\n"
-    return text
+  if em.InputFetchStartTimestamp != nil {
+    if ifst, err = ptypes.Timestamp(em.InputFetchStartTimestamp); err != nil {
+      text += err.Error() + "\n"
+      return text
+    }
   }
-  if ifct, err = ptypes.Timestamp(em.InputFetchCompletedTimestamp); err != nil {
-    text += err.Error() + "\n"
-    return text
+  if em.InputFetchCompletedTimestamp != nil {
+    if ifct, err = ptypes.Timestamp(em.InputFetchCompletedTimestamp); err != nil {
+      text += err.Error() + "\n"
+      return text
+    }
   }
-  if est, err = ptypes.Timestamp(em.ExecutionStartTimestamp); err != nil {
-    text += err.Error() + "\n"
-    return text
+  if em.ExecutionStartTimestamp != nil {
+    if est, err = ptypes.Timestamp(em.ExecutionStartTimestamp); err != nil {
+      text += err.Error() + "\n"
+      return text
+    }
   }
-  if ect, err = ptypes.Timestamp(em.ExecutionCompletedTimestamp); err != nil {
-    text += err.Error() + "\n"
-    return text
+  if em.ExecutionCompletedTimestamp != nil {
+    if ect, err = ptypes.Timestamp(em.ExecutionCompletedTimestamp); err != nil {
+      text += err.Error() + "\n"
+      return text
+    }
   }
-  if oust, err = ptypes.Timestamp(em.OutputUploadStartTimestamp); err != nil {
-    text += err.Error() + "\n"
-    return text
+  if em.OutputUploadStartTimestamp != nil {
+    if oust, err = ptypes.Timestamp(em.OutputUploadStartTimestamp); err != nil {
+      text += err.Error() + "\n"
+      return text
+    }
   }
-  if ouct, err = ptypes.Timestamp(em.OutputUploadCompletedTimestamp); err != nil {
-    text += err.Error() + "\n"
-    return text
+  if em.OutputUploadCompletedTimestamp != nil {
+    if ouct, err = ptypes.Timestamp(em.OutputUploadCompletedTimestamp); err != nil {
+      text += err.Error() + "\n"
+      return text
+    }
   }
   text += fmt.Sprintf("queued at: %s\n", formatTime(qt))
-  qstall := wst.Sub(qt)
-  text += fmt.Sprintf("worker start: %s stalled\n", qstall)
-  ifstall := ifst.Sub(wst)
-  text += fmt.Sprintf("input fetch start: %s elapsed, %s stalled\n", ifst.Sub(qt).String(), ifstall.String())
-  text += fmt.Sprintf("input fetch complete: %s elapsed, took %s\n", ifct.Sub(qt).String(), ifct.Sub(ifst).String())
-  estall := est.Sub(ifct)
-  text += fmt.Sprintf("execute start: %s elapsed, %s stalled\n", est.Sub(qt).String(), estall.String())
-  text += fmt.Sprintf("execute complete: %s elapsed, took %s\n", ect.Sub(qt).String(), ect.Sub(est).String())
-  oustall := oust.Sub(ect)
-  text += fmt.Sprintf("output upload start: %s elapsed, %s stalled\n", oust.Sub(qt).String(), oustall.String())
-  text += fmt.Sprintf("output upload complete: %s elapsed, took %s\n", ouct.Sub(qt).String(), ouct.Sub(oust).String())
-  text += fmt.Sprintf(
-      "worker complete: %s elapsed, %s total stalled\n",
-      wct.Sub(qt).String(),
-      (wct.Sub(ouct) + oustall + estall + ifstall + qstall).String())
+  var qstall time.Duration
+  if wst.Compare(qt) > 0 {
+    qstall := wst.Sub(qt)
+    text += fmt.Sprintf("worker start: %s stalled\n", qstall)
+  }
+  var ifstall time.Duration
+  if ifst.Compare(wst) > 0 {
+    ifstall := ifst.Sub(wst)
+    text += fmt.Sprintf("input fetch start: %s elapsed, %s stalled\n", ifst.Sub(qt).String(), ifstall.String())
+    if ifct.Compare(qt) > 0 {
+      text += fmt.Sprintf("input fetch complete: %s elapsed, took %s\n", ifct.Sub(qt).String(), ifct.Sub(ifst).String())
+    } else {
+      text += fmt.Sprintf("input fetch running for %s\n", time.Now().Sub(wst).String())
+    }
+  }
+  var estall time.Duration
+  if est.Compare(ifct) > 0 {
+    estall := est.Sub(ifct)
+    text += fmt.Sprintf("execute start: %s elapsed, %s stalled\n", est.Sub(qt).String(), estall.String())
+    if ect.Compare(qt) > 0 {
+      text += fmt.Sprintf("execute complete: %s elapsed, took %s\n", ect.Sub(qt).String(), ect.Sub(est).String())
+    } else {
+      text += fmt.Sprintf("execute running for %s\n", time.Now().Sub(est).String())
+    }
+  } else if (ifct.Compare(qt) > 0) {
+    text += fmt.Sprintf("execute stalled for %s\n", time.Now().Sub(ifct).String())
+  }
+  var oustall time.Duration
+  if oust.Compare(ect) > 0 {
+    oustall := oust.Sub(ect)
+    text += fmt.Sprintf("output upload start: %s elapsed, %s stalled\n", oust.Sub(qt).String(), oustall.String())
+    if ouct.Compare(qt) > 0 {
+      text += fmt.Sprintf("output upload complete: %s elapsed, took %s\n", ouct.Sub(qt).String(), ouct.Sub(oust).String())
+    } else {
+      text += fmt.Sprintf("output upload running for %s\n", formatTime(oust), time.Now().Sub(est).String())
+    }
+  } else if (oust.Compare(qt) > 0) {
+    text += fmt.Sprintf("output upload stalled for %s\n", time.Now().Sub(ect).String())
+  }
+  if wct.Compare(qt) > 0 {
+    text += fmt.Sprintf(
+        "worker complete: %s elapsed, %s total stalled\n",
+        wct.Sub(qt).String(),
+        (wct.Sub(ouct) + oustall + estall + ifstall + qstall).String())
+  }
   return text
 }
 
@@ -334,7 +365,11 @@ func renderExecuteOperationMetadata(em *reapi.ExecuteOperationMetadata, selectio
     Stage: em.Stage,
   }
   text := proto.MarshalTextString(stage) + "\n"
-  return text + fmt.Sprintf("action: %s\n", renderDigest(em.ActionDigest, selection == 2))
+  text += fmt.Sprintf("action: %s\n", renderDigest(em.ActionDigest, selection == 2))
+  if em.PartialExecutionMetadata != nil {
+    text += renderExecutedActionMetadata(em.PartialExecutionMetadata, selection == 4)
+  }
+  return text
 }
 
 func renderInline(l int) string {
@@ -368,7 +403,16 @@ func createCorrelatedView(v *operationView) View {
 }
 
 func createInvocationView(v *operationView) View {
-  return v
+  m, ok := v.a.Metadatas[v.name]
+
+  if !ok {
+    panic(v.name)
+    return v
+  }
+
+  olv := NewOperationList(v.a, 4, v)
+  olv.Filter = "invocationId=" + m.ToolInvocationId
+  return olv
 }
 
 func createQueuedOperationView(v *operationView, d *reapi.Digest) View {

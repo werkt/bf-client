@@ -21,6 +21,7 @@ type operation struct {
 }
 
 type operationList struct {
+  Filter string
   a *client.App
   ops []string
   opcache *lru.Cache[string, operation]
@@ -70,6 +71,45 @@ func (v operationList) fetchQueues(max int64, cb func(string) (*client.Operation
   for _, queue := range v.queues {
     ops = append(ops, queue.Slice(context.Background(), v.a.Client, 0, max, cb)...)
     if int64(len(ops)) >= max {
+      break
+    }
+  }
+  return ops
+}
+
+func (v operationList) fetchFiltered() []*client.Operation {
+  var ops []*client.Operation
+  var nextPageToken, pageToken string
+  c := longrunning.NewOperationsClient(v.a.Conn)
+  for nextPageToken, pageToken = "initial", ""; len(ops) < 20 && nextPageToken != ""; pageToken = nextPageToken {
+    r, err := c.ListOperations(context.Background(), &longrunning.ListOperationsRequest {
+      Name: "<instance>/operations",
+      Filter: v.Filter,
+      PageSize: 20,
+      PageToken: pageToken,
+    })
+    if err != nil {
+      panic(err)
+    }
+    opsPage := r.Operations
+    for _, op := range opsPage {
+      ops = append(ops, &client.Operation{ Name: op.Name })
+    }
+    nextPageToken = r.NextPageToken
+  }
+
+  for _, op := range ops {
+    if _, ok := v.a.Metadatas[op.Name]; !ok {
+      v.a.Fetches++
+      o, err := c.GetOperation(context.Background(), &longrunning.GetOperationRequest {
+        Name: op.Name,
+      })
+      if err != nil {
+        continue
+      }
+      op.Metadata = getRequestMetadata(o)
+    }
+    if v.a.Fetches > 10 {
       break
     }
   }
@@ -128,6 +168,7 @@ func (v operationList) fetch() []*client.Operation {
   case 1: return v.fetchQueues(20, client.ParsePrequeueName)
   case 2: return v.fetchQueues(20, client.ParseQueueName)
   case 3: return v.fetchDispatched()
+  case 4: return v.fetchFiltered()
   default:
     return make([]*client.Operation, 0)
   }
@@ -205,10 +246,20 @@ func (v *operationList) Update() {
   }
 }
 
+func (v operationList) modeTitle() string {
+  switch v.mode {
+  case 1: return "Prequeue"
+  case 2: return "Queue"
+  case 3: return "Dispatched"
+  case 4: return fmt.Sprintf("Filter(%s)", v.Filter)
+  default: return "Unknown"
+  }
+}
+
 func (v operationList) Render() []ui.Drawable {
   ops := widgets.NewList()
   fields := [...]string{"name", "target", "build", "mnemonic"}
-  ops.Title = fmt.Sprintf("Operations (%s)", fields[v.field])
+  ops.Title = fmt.Sprintf("%s Operations (%s)", v.modeTitle(), fields[v.field])
   ops.Rows = make([]string, 20)
   for i := 0; i < 20 && i < len(v.ops); i++ {
     name := v.ops[i]
@@ -239,8 +290,6 @@ func getRequestMetadata(o *longrunning.Operation) *reapi.RequestMetadata {
   m := o.Metadata
   em := &reapi.ExecuteOperationMetadata{}
   qm := &bfpb.QueuedOperationMetadata{}
-  xm := &bfpb.ExecutingOperationMetadata{}
-  cm := &bfpb.CompletedOperationMetadata{}
   if ptypes.Is(m, em) {
     return nil
   } else if ptypes.Is(m, qm) {
@@ -248,18 +297,6 @@ func getRequestMetadata(o *longrunning.Operation) *reapi.RequestMetadata {
       return nil
     } else {
       return qm.RequestMetadata
-    }
-  } else if ptypes.Is(m, xm) {
-    if err := ptypes.UnmarshalAny(m, xm); err != nil {
-      return nil
-    } else {
-      return xm.RequestMetadata
-    }
-  } else if ptypes.Is(m, cm) {
-    if err := ptypes.UnmarshalAny(m, cm); err != nil {
-      return nil
-    } else {
-      return cm.RequestMetadata
     }
   } else {
     return nil
