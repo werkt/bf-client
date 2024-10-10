@@ -1,14 +1,14 @@
 # gazelle:prefix github.com/werkt/bf-client
-
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
 load("@bazel_gazelle//:def.bzl", "gazelle")
+load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
 
 gazelle(name = "gazelle")
 
 go_library(
     name = "go_default_library",
     srcs = [
-      "main.go",
+        "main.go",
     ],
     importpath = "github.com/werkt/bf-client",
     visibility = ["//visibility:private"],

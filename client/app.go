@@ -6,6 +6,7 @@ import (
   "fmt"
   "io/ioutil"
   "strings"
+  "time"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   "google.golang.org/genproto/googleapis/longrunning"
   "google.golang.org/grpc"
@@ -15,6 +16,8 @@ import (
 type App struct {
   RedisHost string
   ReapiHost string
+  LastRedisLatency time.Duration
+  LastReapiLatency time.Duration
   CA string
   Done bool
   Client *UnifiedRedis

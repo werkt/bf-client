@@ -6,19 +6,21 @@ import (
   "google.golang.org/grpc"
   "io"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
 )
 
-func FetchTree(d *reapi.Digest, i map[string]*reapi.Directory, c *grpc.ClientConn) error {
+func FetchTree(d bfpb.Digest, i map[string]*reapi.Directory, c *grpc.ClientConn) error {
   cas := reapi.NewContentAddressableStorageClient(c)
   nt := "initial"
 
   for t := ""; nt != ""; t = nt {
+    rootDigest := FromDigest(d)
     gtc, err := cas.GetTree(context.Background(), &reapi.GetTreeRequest {
       // needs instance name
-      RootDigest: d,
+      RootDigest: &rootDigest,
       // default page size
       PageToken: t,
-      // default digest function
+      DigestFunction: d.DigestFunction,
     })
 
     if err != nil {
@@ -38,7 +40,7 @@ func FetchTree(d *reapi.Digest, i map[string]*reapi.Directory, c *grpc.ClientCon
         }
 
         // insert into map
-        i[DigestString(&dirDigest)] = dir
+        i[DigestString(dirDigest)] = dir
       }
       nt = gtr.NextPageToken
     }

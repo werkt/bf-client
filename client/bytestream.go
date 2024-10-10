@@ -3,13 +3,13 @@ package client
 import (
   "context"
   "io"
-  reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   "github.com/golang/protobuf/proto"
   "google.golang.org/grpc"
   "google.golang.org/genproto/googleapis/bytestream"
 )
 
-func Expect(c *grpc.ClientConn, d *reapi.Digest, m proto.Message) error {
+func Expect(c *grpc.ClientConn, d bfpb.Digest, m proto.Message) error {
   bs := bytestream.NewByteStreamClient(c)
 
   bsrc, err := bs.Read(context.Background(), &bytestream.ReadRequest {
@@ -25,7 +25,7 @@ func Expect(c *grpc.ClientConn, d *reapi.Digest, m proto.Message) error {
     if err == io.EOF {
       break
     }
-    if int64(len(br.Data)) == d.SizeBytes {
+    if int64(len(br.Data)) == d.Size {
       b = br.Data
     }
     err = proto.Unmarshal(b, m)

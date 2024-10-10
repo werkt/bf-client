@@ -2,6 +2,7 @@ package view
 
 import (
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
   "github.com/gizak/termui/v3/widgets"
   "github.com/golang/protobuf/proto"
@@ -10,13 +11,13 @@ import (
 
 type commandView struct {
   a *client.App
-  d *reapi.Digest
+  d bfpb.Digest
   command *reapi.Command
   err error
   v View
 }
 
-func NewCommand(a *client.App, d *reapi.Digest, v View) View {
+func NewCommand(a *client.App, d bfpb.Digest, v View) View {
   return &commandView {
     a: a,
     d: d,

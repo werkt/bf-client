@@ -88,7 +88,7 @@ func main() {
   c.open()
 
   uiEvents := ui.PollEvents()
-  ticker := time.NewTicker(time.Millisecond / 60).C
+  ticker := time.NewTicker(time.Second / 60).C
   for !c.done() {
     select {
     case e := <-uiEvents:

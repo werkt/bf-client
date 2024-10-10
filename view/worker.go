@@ -4,7 +4,7 @@ import (
   "context"
   "fmt"
 
-  bfpb "github.com/bazelbuild/bazel-buildfarm/build/buildfarm/v1test"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
   "github.com/werkt/bf-client/client"
   "google.golang.org/genproto/googleapis/longrunning"

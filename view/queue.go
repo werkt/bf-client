@@ -10,7 +10,8 @@ import (
   "time"
   "github.com/gizak/termui/v3/widgets"
   ui "github.com/gizak/termui/v3"
-  bfpb "github.com/bazelbuild/bazel-buildfarm/build/buildfarm/v1test"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
+  //reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   "github.com/werkt/bf-client/client"
   "google.golang.org/grpc"
   "google.golang.org/grpc/codes"
@@ -209,9 +210,18 @@ func (v *Queue) Update() {
       wg.Wait()
     }
   }
+  start := time.Now()
   st, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest {
     InstanceName: "shard",
   })
+  v.a.LastReapiLatency = time.Since(start)
+  /*
+  re := reapi.NewCapabilitiesClient(v.a.Conn)
+  start = time.Now()
+  _, err = re.GetCapabilities(context.Background(), &reapi.GetCapabilitiesRequest {
+  })
+  v.a.LastReapiLatency = time.Since(start)
+  */
   if err == nil {
     s.status = *st
     s.workers = st.ActiveWorkers;
@@ -293,7 +303,7 @@ func treeDimensions(t *client.Tree) dims {
 func (v Queue) Render() []ui.Drawable {
   s := v.s
   p := widgets.NewParagraph()
-  p.Text = v.a.RedisHost + "\n" + v.a.ReapiHost + "\n" + formatTime(s.last)
+  p.Text = fmt.Sprintf("%v: %v\n%v: %v\n%v", v.a.RedisHost, v.a.LastRedisLatency, v.a.ReapiHost, v.a.LastReapiLatency, formatTime(s.last))
   p.SetRect(0, 0, 80, 5)
 
   d := treeDimensions(v.stats)

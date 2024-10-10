@@ -6,8 +6,8 @@ import (
   "fmt"
   "regexp"
   "time"
-  bfpb "github.com/bazelbuild/bazel-buildfarm/build/buildfarm/v1test"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
   "github.com/gizak/termui/v3/widgets"
   "github.com/golang/protobuf/proto"
@@ -99,11 +99,13 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
   m := v.op.Metadata
   em := &reapi.ExecuteOperationMetadata{}
   qm := &bfpb.QueuedOperationMetadata{}
+  df := reapi.DigestFunction_UNKNOWN
   if ptypes.Is(m, em) {
     if err := ptypes.UnmarshalAny(m, em); err != nil {
       op.Text = err.Error()
       v.selectableFields = 0
     } else {
+      df = em.DigestFunction
       m, ok := v.a.Metadatas[v.name]
       op.Text = ""
       if ok {
@@ -120,21 +122,22 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
         v.selectionActions[1] = createCorrelatedView
         actionIndex = 2
       }
-      v.selectionActions[actionIndex] = func(ov *operationView) View { return NewAction(v.a, em.ActionDigest, ov) }
+      v.selectionActions[actionIndex] = func(ov *operationView) View { return NewAction(v.a, client.ToDigest(*em.ActionDigest, df), ov) }
     }
   } else if ptypes.Is(m, qm) {
     if err := ptypes.UnmarshalAny(m, qm); err != nil {
       op.Text = err.Error()
       v.selectableFields = 0
     } else {
+      df = qm.ExecuteOperationMetadata.DigestFunction
       op.Text = renderRequestMetadata(qm.RequestMetadata, v.selection)
       op.Text += renderExecuteOperationMetadata(qm.ExecuteOperationMetadata, v.selection)
-      op.Text += fmt.Sprintf("queued operation: %s\n", renderDigest(qm.QueuedOperationDigest, v.selection == 3))
+      op.Text += fmt.Sprintf("queued operation: %s\n", renderDigest(*qm.QueuedOperationDigest, v.selection == 3))
       v.selectableFields = 4
       v.selectionActions = make([]func(*operationView) View, v.selectableFields)
       v.selectionActions[0] = createInvocationView
       v.selectionActions[1] = createCorrelatedView
-      v.selectionActions[2] = func(ov *operationView) View { return NewAction(v.a, qm.ExecuteOperationMetadata.ActionDigest, ov) }
+      v.selectionActions[2] = func(ov *operationView) View { return NewAction(v.a, client.ToDigest(*qm.ExecuteOperationMetadata.ActionDigest, df), ov) }
       v.selectionActions[3] = func(ov *operationView) View {
         return createQueuedOperationView(ov, qm.QueuedOperationDigest)
       }
@@ -154,7 +157,7 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
         op.Text += err.Error()
         v.selectableFields = 0
       } else {
-        ex := renderExecuteResponse(er, v.selection)
+        ex := renderExecuteResponse(er, df, v.selection)
         op.Text += ex.text
         selectableFields := v.selectableFields
         v.selectableFields += ex.fields
@@ -178,10 +181,10 @@ type executeText struct {
   actions *list.List
 }
 
-func renderExecuteResponse(er *reapi.ExecuteResponse, selection int) executeText {
+func renderExecuteResponse(er *reapi.ExecuteResponse, df reapi.DigestFunction_Value, selection int) executeText {
   var ex executeText
   if er.Result != nil {
-    ex = renderActionResult(er.Result, selection)
+    ex = renderActionResult(er.Result, df, selection)
   } else {
     ex = executeText {
       text: "nil action result\n",
@@ -215,23 +218,23 @@ func renderRequestMetadata(rm *reapi.RequestMetadata, selection int) string {
   return text
 }
 
-func renderActionResult(ar *reapi.ActionResult, selection int) executeText {
+func renderActionResult(ar *reapi.ActionResult, df reapi.DigestFunction_Value, selection int) executeText {
   text := fmt.Sprintf("exit code: %d\n", ar.ExitCode)
   base := 0
   actions := list.New()
   if len(ar.StderrRaw) > 0 || (ar.StdoutDigest != nil && ar.StdoutDigest.SizeBytes > 0) {
-    text += fmt.Sprintf("stdout: %s%s\n", renderDigest(ar.StdoutDigest, selection == 3), renderInline(len(ar.StdoutRaw)))
+    text += fmt.Sprintf("stdout: %s%s\n", renderREDigest(*ar.StdoutDigest, df, selection == 3), renderInline(len(ar.StdoutRaw)))
     base++
     actions.PushBack(func (v *operationView) View { return contentView(v, ar.StdoutDigest, ar.StdoutRaw, "stdout") })
   }
   if len(ar.StderrRaw) > 0 || (ar.StderrDigest != nil && ar.StderrDigest.SizeBytes > 0) {
-    text += fmt.Sprintf("stderr: %s%s\n", renderDigest(ar.StderrDigest, selection == 4), renderInline(len(ar.StderrRaw)))
+    text += fmt.Sprintf("stderr: %s%s\n", renderREDigest(*ar.StderrDigest, df, selection == 4), renderInline(len(ar.StderrRaw)))
     base++
     actions.PushBack(func (v *operationView) View { return contentView(v, ar.StderrDigest, ar.StderrRaw, "stderr") })
   }
   for i, of := range ar.OutputFiles {
     path := renderPath(of.Path, of.IsExecutable)
-    text += fmt.Sprintf("file: %s (%s)%s\n", path, renderDigest(of.Digest, selection == base + i), renderInline(len(of.Contents)))
+    text += fmt.Sprintf("file: %s (%s)%s\n", path, renderREDigest(*of.Digest, df, selection == base + i), renderInline(len(of.Contents)))
     actions.PushBack(func (v *operationView) View { return contentView(v, of.Digest, nil, path) })
   }
   base += len(ar.OutputFiles)
@@ -239,7 +242,7 @@ func renderActionResult(ar *reapi.ActionResult, selection int) executeText {
     text += fmt.Sprintf("symlink: %s -> %s\n", ofs.Path, ofs.Target)
   }
   for i, od := range ar.OutputDirectories {
-    text += fmt.Sprintf("directory: %s (%s)\n", od.Path, renderDigest(od.TreeDigest, selection == base + i))
+    text += fmt.Sprintf("directory: %s (%s)\n", od.Path, renderREDigest(*od.TreeDigest, df, selection == base + i))
     actions.PushBack(func (v *operationView) View { return outputDirectoryView(v, od.TreeDigest, od.Path) })
   }
   base += len(ar.OutputDirectories)
@@ -365,7 +368,7 @@ func renderExecuteOperationMetadata(em *reapi.ExecuteOperationMetadata, selectio
     Stage: em.Stage,
   }
   text := proto.MarshalTextString(stage) + "\n"
-  text += fmt.Sprintf("action: %s\n", renderDigest(em.ActionDigest, selection == 2))
+  text += fmt.Sprintf("action: %s\n", renderREDigest(*em.ActionDigest, em.DigestFunction, selection == 2))
   if em.PartialExecutionMetadata != nil {
     text += renderExecutedActionMetadata(em.PartialExecutionMetadata, selection == 4)
   }
@@ -394,8 +397,16 @@ func boldIfSelected(s string, selected bool) string {
 }
 
 // deserves its own file probably
-func renderDigest(d *reapi.Digest, selected bool) string {
+func renderDigest(d bfpb.Digest, selected bool) string {
   return boldIfSelected(client.DigestString(d), selected)
+}
+
+func renderREDigest(d reapi.Digest, df reapi.DigestFunction_Value, selected bool) string {
+  return renderDigest(bfpb.Digest {
+    Hash: d.Hash,
+    Size: d.SizeBytes,
+    DigestFunction: df,
+  }, selected)
 }
 
 func createCorrelatedView(v *operationView) View {
@@ -415,7 +426,7 @@ func createInvocationView(v *operationView) View {
   return olv
 }
 
-func createQueuedOperationView(v *operationView, d *reapi.Digest) View {
+func createQueuedOperationView(v *operationView, d *bfpb.Digest) View {
   return v
 }
 

@@ -3,6 +3,7 @@ package view
 import (
   "github.com/gammazero/deque"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
   "github.com/gizak/termui/v3/widgets"
   "github.com/werkt/bf-client/client"
@@ -17,7 +18,7 @@ func (nv nodeValue) String() string {
 
 type inputView struct {
   a *client.App
-  d *reapi.Digest
+  d bfpb.Digest
   i map[string]*reapi.Directory
   err error
   nodes []*widgets.TreeNode
@@ -25,7 +26,7 @@ type inputView struct {
   v View
 }
 
-func NewInput(a *client.App, d *reapi.Digest, v View) View {
+func NewInput(a *client.App, d bfpb.Digest, v View) View {
   return &inputView {
     a: a,
     d: d,
@@ -45,7 +46,7 @@ func (v *inputView) Update() {
   t.Title = "Directory: " + client.DigestString(v.d)
   t.WrapText = false
   t.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
-  v.nodes = createInputNodes(v.i[client.DigestString(v.d)], v.i)
+  v.nodes = createInputNodes(v.i[client.DigestString(v.d)], v.d.DigestFunction, v.i)
   t.SetNodes(v.nodes)
   // setting this on every frame seems to jank it up
   w, h := ui.TerminalDimensions()
@@ -105,41 +106,42 @@ func (v inputView) Render() []ui.Drawable {
   return []ui.Drawable { r }
 }
 
-func fetchTreeRecursive(d *reapi.Digest, i map[string]*reapi.Directory, conn *grpc.ClientConn) {
-  var q deque.Deque[*reapi.Digest]
+func fetchTreeRecursive(d reapi.Digest, df reapi.DigestFunction_Value, i map[string]*reapi.Directory, conn *grpc.ClientConn) {
+  var q deque.Deque[reapi.Digest]
   q.PushFront(d)
   for q.Len() != 0 {
     d := q.PopBack()
-    i[client.DigestString(d)] = nil
-    fetchDirectory(d, &q, i, conn)
+    digest := client.ToDigest(d, df)
+    i[client.DigestString(digest)] = nil
+    fetchDirectory(digest, &q, i, conn)
   }
 }
 
-func fetchDirectory(d *reapi.Digest, q *deque.Deque[*reapi.Digest], i map[string]*reapi.Directory, conn *grpc.ClientConn) {
+func fetchDirectory(d bfpb.Digest, q *deque.Deque[reapi.Digest], i map[string]*reapi.Directory, conn *grpc.ClientConn) {
   dir := &reapi.Directory{}
   if err := client.Expect(conn, d, dir); err != nil {
     return
   }
   i[client.DigestString(d)] = dir
   for _, cd := range dir.Directories {
-    cs := client.DigestString(cd.Digest)
+    cs := client.DigestString(client.ToDigest(*cd.Digest, d.DigestFunction))
     _, exists := i[cs]
     if !exists {
       if cd.Digest.SizeBytes == 0 {
         i[cs] = &reapi.Directory{}
       } else {
-        q.PushFront(cd.Digest)
+        q.PushFront(*cd.Digest)
       }
     }
   }
 }
 
-func createInputNodes(d *reapi.Directory, i map[string]*reapi.Directory) []*widgets.TreeNode {
+func createInputNodes(d *reapi.Directory, df reapi.DigestFunction_Value, i map[string]*reapi.Directory) []*widgets.TreeNode {
   nodes := []*widgets.TreeNode{}
   for _, n := range d.Directories {
     nodes = append(nodes, &widgets.TreeNode{
       Value: nodeValue(n.Name),
-      Nodes: createInputNodes(i[client.DigestString(n.Digest)], i),
+      Nodes: createInputNodes(i[client.DigestString(client.ToDigest(*n.Digest, df))], df, i),
     })
   }
   for _, n := range d.Files {

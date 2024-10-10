@@ -5,7 +5,7 @@ import (
   "fmt"
   "regexp"
   "strings"
-  bfpb "github.com/bazelbuild/bazel-buildfarm/build/buildfarm/v1test"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   redis "github.com/redis/go-redis/v9"
   "github.com/golang/protobuf/jsonpb"

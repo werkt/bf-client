@@ -3,9 +3,10 @@ package view
 import (
   "context"
   "fmt"
+  "time"
 
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
-  bfpb "github.com/bazelbuild/bazel-buildfarm/build/buildfarm/v1test"
+  bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
   "github.com/gizak/termui/v3/widgets"
   "github.com/golang/protobuf/ptypes"
@@ -37,9 +38,11 @@ func NewOperationList(a *client.App, mode int, v View) *operationList {
   var queues []*client.Queue
   if mode != 3 {
     c := bfpb.NewOperationQueueClient(a.Conn)
+    start := time.Now()
     status, err := c.Status(context.Background(), &bfpb.BackplaneStatusRequest {
       InstanceName: "shard",
     })
+    a.LastReapiLatency = time.Since(start)
     if err != nil {
       panic(err)
     }
