@@ -21,8 +21,8 @@ type inputView struct {
   d bfpb.Digest
   i map[string]*reapi.Directory
   err error
-  nodes []*widgets.TreeNode
-  t *widgets.Tree
+  nodes []*client.TreeNode
+  t *client.Tree
   v View
 }
 
@@ -42,7 +42,7 @@ func (v *inputView) Update() {
   v.i = make(map[string]*reapi.Directory)
   client.FetchTree(v.d, v.i, v.a.Conn)
 
-  t := widgets.NewTree()
+  t := client.NewTree()
   t.Title = "Directory: " + client.DigestString(v.d)
   t.WrapText = false
   t.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
@@ -136,23 +136,23 @@ func fetchDirectory(d bfpb.Digest, q *deque.Deque[reapi.Digest], i map[string]*r
   }
 }
 
-func createInputNodes(d *reapi.Directory, df reapi.DigestFunction_Value, i map[string]*reapi.Directory) []*widgets.TreeNode {
-  nodes := []*widgets.TreeNode{}
+func createInputNodes(d *reapi.Directory, df reapi.DigestFunction_Value, i map[string]*reapi.Directory) []*client.TreeNode {
+  nodes := []*client.TreeNode{}
   for _, n := range d.Directories {
-    nodes = append(nodes, &widgets.TreeNode{
+    nodes = append(nodes, &client.TreeNode{
       Value: nodeValue(n.Name),
       Nodes: createInputNodes(i[client.DigestString(client.ToDigest(*n.Digest, df))], df, i),
     })
   }
   for _, n := range d.Files {
-    nodes = append(nodes, &widgets.TreeNode{
+    nodes = append(nodes, &client.TreeNode{
       Value: nodeValue(n.Name),
     })
   }
   return nodes
 }
 
-func expandNodeAll(n *widgets.TreeNode, e bool) {
+func expandNodeAll(n *client.TreeNode, e bool) {
   if len(n.Nodes) > 0 {
     n.Expanded = e
     for _, cn := range n.Nodes {

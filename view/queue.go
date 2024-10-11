@@ -133,6 +133,12 @@ func (v *Queue) Handle(e ui.Event) View {
         v.meter.SelectedRow = -1
       }
     }
+  case "H", "<S-Left>":
+    n := v.stats.SelectedNode()
+    for _, cn := range n.Nodes {
+      expandNodeAll(cn, false)
+    }
+    v.stats.Collapse()
   case "l", "<Right>":
     if v.stats.SelectedRow != 0 {
       if (v.stats.Focused) {
@@ -147,6 +153,12 @@ func (v *Queue) Handle(e ui.Event) View {
         v.meter.SelectedRow = -1
       }
     }
+  case "L", "<S-Right>":
+    n := v.stats.SelectedNode()
+    for _, cn := range n.Nodes {
+      expandNodeAll(cn, true)
+    }
+    v.stats.Expand()
   case "<Enter>":
     if v.meter.SelectedRow >= 0 {
       // get the worker out of the list
