@@ -1,7 +1,7 @@
-load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
+load("@io_bazel_rules_go//go:def.bzl", "go_library")
 
 go_library(
-    name = "client",
+    name = "go_default_library",
     srcs = [
         "app.go",
         "bytestream.go",
@@ -18,7 +18,7 @@ go_library(
     deps = [
         "//third_party/buildfarm:go_default_library",
         "@com_github_gizak_termui_v3//:go_default_library",
-        "@com_github_golang_protobuf//jsonpb:go_default_library_gen",
+        "@com_github_golang_protobuf//jsonpb:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
         "@com_github_mattn_go_runewidth//:go_default_library",
         "@com_github_redis_go_redis_v9//:go_default_library",

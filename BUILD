@@ -1,19 +1,16 @@
 load("@gazelle//:def.bzl", "gazelle")
 load("@io_bazel_rules_go//go:def.bzl", "go_binary", "go_library")
-load("@io_bazel_rules_go//proto:def.bzl", "go_proto_library")
 
 gazelle(name = "gazelle")
 
 go_library(
     name = "go_default_library",
-    srcs = [
-        "main.go",
-    ],
+    srcs = ["main.go"],
     importpath = "github.com/werkt/bf-client",
     visibility = ["//visibility:private"],
     deps = [
-        "//client",
-        "//view",
+        "//client:go_default_library",
+        "//view:go_default_library",
         "@com_github_gizak_termui_v3//:go_default_library",
         "@com_github_gizak_termui_v3//widgets:go_default_library",
         "@com_github_nsf_termbox_go//:go_default_library",
