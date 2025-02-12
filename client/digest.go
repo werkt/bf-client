@@ -1,7 +1,6 @@
 package client
 
 import (
-  "crypto"
   "encoding/hex"
   "fmt"
   "github.com/golang/protobuf/proto"
@@ -26,29 +25,42 @@ func DigestString(d bfpb.Digest) string {
   return fmt.Sprintf("%s%s/%d", prefix, d.Hash, d.Size)
 }
 
-func DigestFromBlob(blob []byte, hashFn crypto.Hash) bfpb.Digest {
-  h := hashFn.New()
+func HasherFromDigestFunction(df reapi.DigestFunction_Value) Hasher {
+  hashers := map[reapi.DigestFunction_Value]Hasher{
+    reapi.DigestFunction_MD5: MD5,
+    reapi.DigestFunction_SHA1: SHA1,
+    reapi.DigestFunction_SHA256: SHA256,
+    reapi.DigestFunction_SHA384: SHA384,
+    reapi.DigestFunction_SHA512: SHA512,
+    reapi.DigestFunction_BLAKE3: BLAKE3,
+  }
+
+  return hashers[df]
+}
+
+func DigestFromBlob(blob []byte, hasher Hasher) bfpb.Digest {
+  h := hasher.New()
   h.Write(blob)
   arr := h.Sum(nil)
 
-  dfs := map[crypto.Hash]reapi.DigestFunction_Value{
-    crypto.MD5: reapi.DigestFunction_MD5,
-    crypto.SHA1: reapi.DigestFunction_SHA1,
-    crypto.SHA256: reapi.DigestFunction_SHA256,
-    crypto.SHA384: reapi.DigestFunction_SHA384,
-    crypto.SHA512: reapi.DigestFunction_SHA512,
-    // crypto.BLAKE3: reapi.DigestFunction_BLAKE3,
+  dfs := map[Hasher]reapi.DigestFunction_Value{
+    MD5: reapi.DigestFunction_MD5,
+    SHA1: reapi.DigestFunction_SHA1,
+    SHA256: reapi.DigestFunction_SHA256,
+    SHA384: reapi.DigestFunction_SHA384,
+    SHA512: reapi.DigestFunction_SHA512,
+    BLAKE3: reapi.DigestFunction_BLAKE3,
   }
 
-  df := dfs[hashFn]
+  df := dfs[hasher]
   return bfpb.Digest{Hash: hex.EncodeToString(arr[:]), Size: int64(len(blob)), DigestFunction: df}
 }
 
-func DigestFromMessage(msg proto.Message, hashFn crypto.Hash) (bfpb.Digest, error) {
+func DigestFromMessage(msg proto.Message, hasher Hasher) (bfpb.Digest, error) {
   blob, err := proto.Marshal(msg)
   if err != nil {
-    Empty := DigestFromBlob([]byte{}, hashFn)
+    Empty := DigestFromBlob([]byte{}, hasher)
     return Empty, err
   }
-  return DigestFromBlob(blob, hashFn), nil
+  return DigestFromBlob(blob, hasher), nil
 }

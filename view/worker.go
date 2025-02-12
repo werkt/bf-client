@@ -2,14 +2,18 @@ package view
 
 import (
   "context"
+  "errors"
   "fmt"
 
+  reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
+  "github.com/gizak/termui/v3/widgets"
   "github.com/werkt/bf-client/client"
   "google.golang.org/genproto/googleapis/longrunning"
   "google.golang.org/grpc/codes"
   "google.golang.org/grpc/status"
+  "github.com/dustin/go-humanize"
 )
 
 type worker struct {
@@ -17,6 +21,7 @@ type worker struct {
   v View
   w string
   profile *bfpb.WorkerProfileMessage
+  title *widgets.Paragraph
   match *client.List
   inputFetch *client.List
   execute *client.List
@@ -31,6 +36,7 @@ func NewStageList() *client.List {
 }
 
 func NewWorker(a *client.App, w string, v View) *worker {
+  title := widgets.NewParagraph()
   match := NewStageList()
   inputFetch := NewStageList()
   execute := NewStageList()
@@ -40,6 +46,7 @@ func NewWorker(a *client.App, w string, v View) *worker {
     a: a,
     v: v,
     w: w,
+    title: title,
     match: match,
     inputFetch: inputFetch,
     execute: execute,
@@ -136,34 +143,92 @@ func populateRows(l *client.List, r []string) {
   l.Rows = rows
 }
 
+func opMatchesStage(op *longrunning.Operation, stage *bfpb.StageInformation) (bool, error) {
+  em, err := client.ExecuteOperationMetadata(op)
+  if err != nil {
+    return false, err
+  }
+  switch stage.Name {
+  case "MatchStage", "InputFetchStage": 
+    return em.Stage == reapi.ExecutionStage_QUEUED, nil
+  case "ExecuteActionStage":
+    return em.Stage == reapi.ExecutionStage_EXECUTING, nil
+  case "ReportResultStage":
+    return em.Stage == reapi.ExecutionStage_COMPLETED, nil
+  }
+  return false, errors.New("Unknown stage: " + stage.Name)
+}
+
 func (v worker) Render() []ui.Drawable {
+  v.title.Text = fmt.Sprintf(
+      "%s CAS Count: %d Size: %s (%d%%) Unref: %d%%",
+      v.w, v.profile.CasEntryCount, humanize.Bytes(uint64(v.profile.CasSize)),
+      int((float64(v.profile.CasSize) / float64(v.profile.CasMaxSize)) * 100),
+      int((float64(v.profile.CasUnreferencedEntryCount) / float64(v.profile.CasEntryCount)) * 100))
+  v.title.Border = false
+  v.title.SetRect(0, -1, 80, 2)
   v.match.Title = selectedTitle(v.match.SelectedRow != -1, "Match")
-  v.match.SetRect(0, 0, 80, 3)
 
   v.reportResult.Title = selectedTitle(v.reportResult.SelectedRow != -1, "ReportResult")
 
+  // need some expander logic
+
+  c := longrunning.NewOperationsClient(v.a.Conn)
   for _, stage := range v.profile.Stages {
+    // for all operations in stages
+    for _, name := range stage.OperationNames {
+      // if operation not in cache, fetch it
+      fetch := false
+      if op, ok := v.a.Ops[name]; !ok {
+        fetch = true
+      // if stage is not the operation current stage, fetch it
+      } else if op != nil {
+        match, err := opMatchesStage(op, stage)
+        if err != nil {
+          panic(err)
+        }
+        fetch = !match
+      }
+      if fetch {
+        o, _ := c.GetOperation(context.Background(), &longrunning.GetOperationRequest {
+          Name: name,
+        })
+        v.a.Ops[name] = o
+      }
+    }
+
     switch stage.Name {
     case "MatchStage":
       populateRows(v.match, stage.OperationNames)
     case "InputFetchStage":
       v.inputFetch.Title = fmt.Sprintf(selectedTitle(v.inputFetch.SelectedRow != -1, "InputFetch") + " %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
       populateRows(v.inputFetch, stage.OperationNames)
-      v.inputFetch.SetRect(0, 3, 80, 5 + len(v.inputFetch.Rows))
     case "ExecuteActionStage":
       v.execute.Title = fmt.Sprintf(selectedTitle(v.execute.SelectedRow != -1, "Execute") + " %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
       // TODO get some time spent doing this
       populateRows(v.execute, stage.OperationNames)
     case "ReportResultStage":
+      v.reportResult.Title = fmt.Sprintf(selectedTitle(v.reportResult.SelectedRow != -1, "Report Result") + " %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
       populateRows(v.reportResult, stage.OperationNames)
     }
   }
-  i := 5 + len(v.inputFetch.Rows)
-  v.execute.SetRect(0, i, 80, i + 2 + len(v.execute.Rows))
-  i += 2 + len(v.execute.Rows)
-  v.reportResult.SetRect(0, i, 80, i + 3)
 
-  return []ui.Drawable { v.match, v.inputFetch, v.execute, v.reportResult }
+  row := 1
+  v.match.SetRect(0, row, 80, row + 3)
+  row += 3
+  inputFetchRows := len(v.inputFetch.Rows)
+  inputFetchHeight := Min(inputFetchRows, 5)
+  v.inputFetch.SetRect(0, row, 80, row + 2 + inputFetchHeight)
+  row += 2 + inputFetchHeight
+  executeRows := len(v.execute.Rows)
+  executeHeight := Min(executeRows, 5)
+  v.execute.SetRect(0, row, 80, row + 2 + executeHeight)
+  row += 2 + executeHeight
+  reportResultRows := len(v.reportResult.Rows)
+  reportResultHeight := Min(reportResultRows, 5)
+  v.reportResult.SetRect(0, row, 80, row + 2 + reportResultHeight)
+
+  return []ui.Drawable { v.title, v.match, v.inputFetch, v.execute, v.reportResult }
 }
 
 func (v *worker) Update() {

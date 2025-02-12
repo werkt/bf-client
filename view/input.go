@@ -1,6 +1,7 @@
 package view
 
 import (
+  "fmt"
   "github.com/gammazero/deque"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
@@ -10,10 +11,17 @@ import (
   "google.golang.org/grpc"
 )
 
-type nodeValue string
+type nodeValue struct {
+  name string
+  size int
+}
 
 func (nv nodeValue) String() string {
-  return string(nv)
+  if nv.size == 0 {
+    return nv.name
+  }
+  // maybe have N / size if opened
+  return fmt.Sprintf("%s (%d)", nv.name, nv.size)
 }
 
 type inputView struct {
@@ -36,6 +44,7 @@ func NewInput(a *client.App, d bfpb.Digest, v View) View {
 
 func (v *inputView) Update() {
   if v.i != nil {
+    v.t.Title = "Directory: " + client.DigestString(v.d) + fmt.Sprintf(" (%d/%d)", v.t.SelectedRow, v.t.Size())
     return
   }
 
@@ -43,10 +52,13 @@ func (v *inputView) Update() {
   client.FetchTree(v.d, v.i, v.a.Conn)
 
   t := client.NewTree()
+  t.Focused = true
   t.Title = "Directory: " + client.DigestString(v.d)
   t.WrapText = false
   t.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
-  v.nodes = createInputNodes(v.i[client.DigestString(v.d)], v.d.DigestFunction, v.i)
+  root := client.DigestString(v.d)
+  sizes := make(map[string]int)
+  v.nodes = createInputNodes(v.i[root], root, v.d.DigestFunction, v.i, sizes)
   t.SetNodes(v.nodes)
   // setting this on every frame seems to jank it up
   w, h := ui.TerminalDimensions()
@@ -136,19 +148,26 @@ func fetchDirectory(d bfpb.Digest, q *deque.Deque[reapi.Digest], i map[string]*r
   }
 }
 
-func createInputNodes(d *reapi.Directory, df reapi.DigestFunction_Value, i map[string]*reapi.Directory) []*client.TreeNode {
+func createInputNodes(d *reapi.Directory, dd string, df reapi.DigestFunction_Value, i map[string]*reapi.Directory, sizes map[string]int) []*client.TreeNode {
   nodes := []*client.TreeNode{}
+  size := 0
   for _, n := range d.Directories {
+    child := client.DigestString(client.ToDigest(*n.Digest, df))
+    childNodes := createInputNodes(i[child], child, df, i, sizes)
+    childSize := sizes[child]
     nodes = append(nodes, &client.TreeNode{
-      Value: nodeValue(n.Name),
-      Nodes: createInputNodes(i[client.DigestString(client.ToDigest(*n.Digest, df))], df, i),
+      Value: nodeValue{name: n.Name, size: childSize},
+      Nodes: childNodes,
     })
+    size += childSize
   }
+  size += len(d.Files)
   for _, n := range d.Files {
     nodes = append(nodes, &client.TreeNode{
-      Value: nodeValue(n.Name),
+      Value: nodeValue{name: n.Name},
     })
   }
+  sizes[dd] = size
   return nodes
 }
 

@@ -11,12 +11,13 @@ import (
   "github.com/gizak/termui/v3/widgets"
   ui "github.com/gizak/termui/v3"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
-  //reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   "github.com/werkt/bf-client/client"
   "google.golang.org/grpc"
   "google.golang.org/grpc/codes"
   "google.golang.org/grpc/status"
 )
+
+var workersSorts = []string{"Executions", "Name"}
 
 type profileResult struct {
   profile *bfpb.WorkerProfileMessage
@@ -63,10 +64,19 @@ type Queue struct {
   queueNode client.TreeNode
   queue numValue
   dispatched numValue
+  workersSort int
 }
 
 func statNode(nv *numValue) *client.TreeNode {
   return &client.TreeNode{ Value: nv, }
+}
+
+type workersSort struct {
+  q *Queue
+}
+
+func (s workersSort) String() string {
+  return workersSorts[s.q.workersSort]
 }
 
 func NewQueue(a *client.App, selected int) *Queue {
@@ -87,7 +97,9 @@ func NewQueue(a *client.App, selected int) *Queue {
     prequeue: numValue{ fmt: "Prequeue: %v", mode: 1 },
     queue: numValue{ fmt: "Queue: %v", mode: 2 },
     dispatched: numValue{ fmt: "Dispatched: %v", mode: 3 },
+    workersSort: 0,
   }
+  meter.SubTitle = &workersSort { q: q } 
   q.stats.Focused = true
   q.stats.SelectedRow = selected
   q.stats.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
@@ -106,6 +118,14 @@ func (v *Queue) Handle(e ui.Event) View {
   switch e.ID {
   case "<Escape>", "q", "<C-c>":
     v.a.Done = true
+  case "J", "<PageDown>":
+    if v.meter.SelectedRow != -1 {
+      v.meter.ScrollAmount(v.meter.Inner.Dy())
+    }
+  case "K", "<PageUp>":
+    if v.meter.SelectedRow != -1 {
+      v.meter.ScrollAmount(-v.meter.Inner.Dy())
+    }
   case "j", "<Down>":
     if v.stats.Focused {
       v.stats.ScrollDown()
@@ -163,9 +183,23 @@ func (v *Queue) Handle(e ui.Event) View {
     if v.meter.SelectedRow >= 0 {
       // get the worker out of the list
       return NewWorker(v.a, v.meter.Rows[v.meter.SelectedRow].(Worker).w, v)
-    } else {
+    } else if v.stats.SelectedNode().Value.(*numValue).mode != 0 {
       ui.Clear()
       return NewOperationList(v.a, v.stats.SelectedNode().Value.(*numValue).mode, v)
+    }
+  case "/":
+    return NewSearch(v.a, v)
+  case "T":
+    return NewTest(v.a, v)
+  case ">":
+    if v.stats.SelectedRow == 0 {
+      v.workersSort++
+      v.workersSort %= len(workersSorts)
+    }
+  case "<":
+    if v.stats.SelectedRow == 0 {
+      v.workersSort += len(workersSorts) - 1
+      v.workersSort %= len(workersSorts)
     }
   /*
   case "S":
@@ -227,17 +261,11 @@ func (v *Queue) Update() {
     InstanceName: "shard",
   })
   v.a.LastReapiLatency = time.Since(start)
-  /*
-  re := reapi.NewCapabilitiesClient(v.a.Conn)
-  start = time.Now()
-  _, err = re.GetCapabilities(context.Background(), &reapi.GetCapabilitiesRequest {
-  })
-  v.a.LastReapiLatency = time.Since(start)
-  */
   if err == nil {
     s.status = *st
     s.workers = st.ActiveWorkers;
   } else {
+    panic(err)
     st, ok := status.FromError(err)
     if !ok || (st.Code() != codes.Unknown && st.Code() != codes.Unavailable) {
       panic(err)
@@ -325,7 +353,7 @@ func (v Queue) Render() []ui.Drawable {
 
   var info ui.Drawable
   if v.stats.SelectedRow == 0 {
-    info = renderWorkersInfo(&s, v.meter, d.width, v.h)
+    info = renderWorkersInfo(&s, v.meter, d.width, v.h, v.workersSort)
   } else {
     plot := widgets.NewPlot()
     plot.Data = make([][]float64, 1)
@@ -403,9 +431,9 @@ func fetchProfile(v *Queue, worker string, conn *grpc.ClientConn, wg *sync.WaitG
   }
 }
 
-type By func(w1, w2 *string) bool
+type by func(w1, w2 *string) bool
 
-func (by By) Sort(workers []string) {
+func (by by) Sort(workers []string) {
   ws := &workerSorter{
     workers: workers,
     by:      by, // The Sort method's receiver is the function (closure) that defines the sort order.
@@ -443,7 +471,7 @@ func (w Worker) String() string {
 }
 
 // List needs work on draw, flip for only background, etc
-func renderWorkersInfo(s *stats, meter *client.List, x int, h int) ui.Drawable {
+func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int) ui.Drawable {
   plen := len(s.workers)
 
   meter.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
@@ -457,6 +485,9 @@ func renderWorkersInfo(s *stats, meter *client.List, x int, h int) ui.Drawable {
       wl = twl
     }
   }
+
+  // bleh
+
   exec_used := func(worker *string) int {
     profileResult := s.profiles[*worker]
     if profileResult == nil {
@@ -492,7 +523,16 @@ func renderWorkersInfo(s *stats, meter *client.List, x int, h int) ui.Drawable {
     }
     return exec_used(w1) < exec_used(w2)
   }
-  By(exec).Sort(s.workers)
+  name := func(w1, w2 *string) bool {
+    return *w1 < *w2
+  }
+  if sort == 0 {
+    by(exec).Sort(s.workers)
+  } else {
+    by(name).Sort(s.workers)
+  }
+
+  // end sorting
 
   n := 0
   rows := make([]fmt.Stringer, plen)
@@ -503,6 +543,11 @@ func renderWorkersInfo(s *stats, meter *client.List, x int, h int) ui.Drawable {
   meter.Rows = rows
 
   return meter
+}
+
+func countBar(used int, slots int) string {
+  // # used/slots #
+  return fmt.Sprintf("# %d/%d #", used, slots)
 }
 
 func renderWorkerRow(r *profileResult, w string, wl int) Worker {
@@ -525,20 +570,40 @@ func renderWorkerRow(r *profileResult, w string, wl int) Worker {
     }
   }
   row := strings.Repeat(" ", wl - len(w))
-  row += w + ": [" + strings.Repeat(" ", input_fetch_slots - input_fetch_used)
-  row += strings.Repeat("#", input_fetch_used) + "]("
+  row += w + ": ["
+  fetchCountBar := countBar(input_fetch_used, input_fetch_slots)
+  if input_fetch_used > len(fetchCountBar) {
+    row += fetchCountBar + "]("
+  } else {
+    width := Min(input_fetch_slots, len(fetchCountBar))
+    row += strings.Repeat(" ", width - input_fetch_used)
+    row += strings.Repeat("#", input_fetch_used) + "]("
+  }
   if input_fetch_used == input_fetch_slots {
     row += "fg:black,mod:dim,bg:blue"
   } else {
     row += "fg:blue"
   }
-  row += ")[" + strings.Repeat("#", execute_action_used) + "]("
+  // do some math on the rest of this so that it fits nicely in the display
+  row += ")["
+  // need to consider size of screen and skip the closing bar if we're over
+  executeCount := false
+  executeCountBar := countBar(execute_action_used, execute_action_slots)
+  if execute_action_used > len(executeCountBar) {
+    row += executeCountBar + "]("
+    executeCount = true
+  } else {
+    row += strings.Repeat("#", execute_action_used) + "]("
+  }
   if execute_action_used == execute_action_slots {
     row += "fg:black,mod:dim,bg:red"
   } else {
     row += "fg:red"
   }
-  row += fmt.Sprintf(") %d/%d", execute_action_used, execute_action_slots)
+  row += ")"
+  if !executeCount {
+    row += fmt.Sprintf(" %d/%d", execute_action_used, execute_action_slots)
+  }
   if r.stale > 0 {
     row += " stale"
     if len(r.message) > 0 {
@@ -553,11 +618,4 @@ func renderWorkerRow(r *profileResult, w string, wl int) Worker {
 
 func formatTime(t time.Time) string {
   return t.Format("Mon Jan 2 15:04:05 -0700 MST 2006")
-}
-
-func selectStat(selected bool, msg string) string {
-  if selected {
-    return "[" + msg + "](fg:black,bg:white)"
-  }
-  return msg
 }

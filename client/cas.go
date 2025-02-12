@@ -1,7 +1,6 @@
 package client
 
 import (
-  "crypto"
   "context"
   "google.golang.org/grpc"
   "io"
@@ -12,6 +11,8 @@ import (
 func FetchTree(d bfpb.Digest, i map[string]*reapi.Directory, c *grpc.ClientConn) error {
   cas := reapi.NewContentAddressableStorageClient(c)
   nt := "initial"
+
+  hashFn := HasherFromDigestFunction(d.DigestFunction)
 
   for t := ""; nt != ""; t = nt {
     rootDigest := FromDigest(d)
@@ -34,7 +35,7 @@ func FetchTree(d bfpb.Digest, i map[string]*reapi.Directory, c *grpc.ClientConn)
       }
       for _, dir := range gtr.Directories {
         // compute digest of directory
-        dirDigest, err := DigestFromMessage(dir, crypto.SHA256)
+        dirDigest, err := DigestFromMessage(dir, hashFn)
         if err != nil {
           return err
         }

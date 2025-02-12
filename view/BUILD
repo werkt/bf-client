@@ -9,6 +9,10 @@ go_library(
         "operation.go",
         "operation_list.go",
         "queue.go",
+        "search.go",
+        "search_results.go",
+        "test.go",
+        "util.go",
         "view.go",
         "worker.go",
     ],
@@ -17,6 +21,7 @@ go_library(
     deps = [
         "//client:go_default_library",
         "//third_party/buildfarm:go_default_library",
+        "@com_github_dustin_go_humanize//:go_default_library",
         "@com_github_gammazero_deque//:go_default_library",
         "@com_github_gizak_termui_v3//:go_default_library",
         "@com_github_gizak_termui_v3//widgets:go_default_library",

@@ -258,3 +258,7 @@ func (self *Tree) CollapseAll() {
   })
   self.prepareNodes()
 }
+
+func (self *Tree) Size() int {
+  return len(self.rows)
+}

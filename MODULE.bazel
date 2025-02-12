@@ -36,6 +36,7 @@ use_repo(
     "com_github_nsf_termbox_go",
     "com_github_redis_go_redis_v9",
     "com_google_cloud_go_longrunning",
+    "com_lukechampine_blake3",
     "org_golang_google_genproto",
     "org_golang_google_genproto_googleapis_api",
     "org_golang_google_genproto_googleapis_bytestream",

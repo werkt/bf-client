@@ -305,3 +305,23 @@ func getRequestMetadata(o *longrunning.Operation) *reapi.RequestMetadata {
     return nil
   }
 }
+
+func getExecutedActionMetadata(o *longrunning.Operation) *reapi.ExecutedActionMetadata {
+  switch r := o.Result.(type) {
+  case *longrunning.Operation_Response:
+    er := &reapi.ExecuteResponse{}
+    if ptypes.Is(r.Response, er) {
+      if err := ptypes.UnmarshalAny(r.Response, er); err != nil && er.Result != nil {
+        return er.Result.ExecutionMetadata
+      }
+    }
+  }
+
+  em := &reapi.ExecuteOperationMetadata{}
+  if ptypes.Is(o.Metadata, em) {
+    if err := ptypes.UnmarshalAny(o.Metadata, em); err != nil {
+      return em.PartialExecutionMetadata
+    }
+  }
+  return nil
+}

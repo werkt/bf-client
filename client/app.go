@@ -14,6 +14,7 @@ import (
 )
 
 type App struct {
+  Instance string
   RedisHost string
   ReapiHost string
   LastRedisLatency time.Duration
@@ -31,6 +32,7 @@ type App struct {
 
 func NewApp(redisHost string, reapiHost string, ca string) *App {
   return &App {
+    Instance: "shard",
     RedisHost: redisHost,
     ReapiHost: reapiHost,
     CA: ca,
@@ -58,7 +60,7 @@ func (a *App) Connect() {
 func connect(host string, ca string) *grpc.ClientConn {
   var opts []grpc.DialOption
   if strings.HasPrefix(host, "grpcs://") {
-    host = host[8:]
+    host = host[8:] + ":443"
     creds, err := loadTLSCredentials(ca)
     if err != nil {
       panic(err)

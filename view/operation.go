@@ -349,7 +349,7 @@ func renderExecutedActionMetadata(em *reapi.ExecutedActionMetadata, workerSelect
     if ouct.Compare(qt) > 0 {
       text += fmt.Sprintf("output upload complete: %s elapsed, took %s\n", ouct.Sub(qt).String(), ouct.Sub(oust).String())
     } else {
-      text += fmt.Sprintf("output upload running for %s\n", formatTime(oust), time.Now().Sub(est).String())
+      text += fmt.Sprintf("output upload running for %s\n", time.Now().Sub(oust).String())
     }
   } else if (oust.Compare(qt) > 0) {
     text += fmt.Sprintf("output upload stalled for %s\n", time.Now().Sub(ect).String())

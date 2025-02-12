@@ -21,6 +21,15 @@ type List struct {
   SelectedRow      int
   topRow           int
   SelectedRowStyle ui.Style
+  SubTitle         fmt.Stringer
+  SubTitleStyle    ui.Style
+}
+
+type emptyStringer struct {
+}
+
+func (e emptyStringer) String() string {
+  return ""
 }
 
 func NewList() *List {
@@ -28,11 +37,23 @@ func NewList() *List {
     Block:            *ui.NewBlock(),
     TextStyle:        ui.Theme.List.Text,
     SelectedRowStyle: ui.Theme.List.Text,
+    SubTitle:         &emptyStringer{},
+    SubTitleStyle:    ui.Theme.List.Text,
   }
 }
 
 func (self *List) Draw(buf *ui.Buffer) {
   self.Block.Draw(buf)
+
+  subTitle := self.SubTitle.String()
+  subTitleLen := len(subTitle)
+  if subTitleLen > 0 {
+    buf.SetString(
+        subTitle,
+        self.SubTitleStyle,
+        image.Pt(self.Max.X-2 - subTitleLen, self.Min.Y),
+    )
+  }
 
   point := self.Inner.Min
 
