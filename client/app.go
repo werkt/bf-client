@@ -6,6 +6,7 @@ import (
   "fmt"
   "io/ioutil"
   "strings"
+  "sync"
   "time"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   "google.golang.org/genproto/googleapis/longrunning"
@@ -28,6 +29,7 @@ type App struct {
   Metadatas map[string]*reapi.RequestMetadata
   Invocations map[string][]string
   Fetches uint
+  Mutex *sync.Mutex
 }
 
 func NewApp(redisHost string, reapiHost string, ca string) *App {
@@ -42,6 +44,7 @@ func NewApp(redisHost string, reapiHost string, ca string) *App {
     Invocations: make(map[string][]string),
     workerConns: make(map[string]*grpc.ClientConn),
     Client: &UnifiedRedis{},
+    Mutex: &sync.Mutex{},
   }
 }
 

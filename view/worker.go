@@ -4,16 +4,21 @@ import (
   "context"
   "errors"
   "fmt"
+  "sort"
+  "sync"
+  "time"
 
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
+  "github.com/dustin/go-humanize"
   "github.com/gizak/termui/v3/widgets"
+  "github.com/golang/protobuf/ptypes"
   "github.com/werkt/bf-client/client"
   "google.golang.org/genproto/googleapis/longrunning"
+  "google.golang.org/grpc"
   "google.golang.org/grpc/codes"
   "google.golang.org/grpc/status"
-  "github.com/dustin/go-humanize"
 )
 
 type worker struct {
@@ -26,6 +31,9 @@ type worker struct {
   inputFetch *client.List
   execute *client.List
   reportResult *client.List
+  field int
+  reversed bool
+  fetches map[string]time.Time
 }
 
 func NewStageList() *client.List {
@@ -51,6 +59,7 @@ func NewWorker(a *client.App, w string, v View) *worker {
     inputFetch: inputFetch,
     execute: execute,
     reportResult: reportResult,
+    fetches: make(map[string]time.Time),
   }
 }
 
@@ -58,7 +67,7 @@ func (v *worker) currentOperationName() string {
   lists := []*client.List { v.match, v.inputFetch, v.execute, v.reportResult }
   for _, list := range lists {
     if list.SelectedRow != -1 && list.SelectedRow < len(list.Rows) {
-      return list.Rows[list.SelectedRow].String()
+      return list.Rows[list.SelectedRow].(*stageEx).name
     }
   }
   return ""
@@ -104,6 +113,12 @@ func (v *worker) Handle(e ui.Event) View {
     v.selectedList().ScrollDown()
   case "k", "<Up>":
     v.selectedList().ScrollUp()
+  case "l", "<Right>":
+    v.field++
+    v.field %= 4
+  case "h", "<Left>":
+    v.field += 3
+    v.field %= 4
   case "<Tab>":
     if v.match.SelectedRow != -1 {
       v.match.SelectedRow = -1
@@ -118,14 +133,44 @@ func (v *worker) Handle(e ui.Event) View {
       v.reportResult.SelectedRow = -1
       v.match.SelectedRow = 0
     }
+  case ">", "<":
+    v.reversed = !v.reversed
   }
   return v
 }
 
-type nodeType string
+type stageEx struct {
+  field func () int
+  name string
+  stalled bool
+  fence time.Time
+  target string
+  mnemonic string
+  build string
+}
 
-func (n nodeType) String() string {
-  return string(n)
+func (e stageEx) label() string {
+  switch e.field() {
+  case 1: return e.target
+  case 2: return e.mnemonic
+  case 3: return e.build
+  }
+  return e.name
+}
+
+func reasonableDuration(d time.Duration) time.Duration {
+  if d.Minutes() >= 1 {
+    return d.Truncate(1*time.Second)
+  }
+  return d.Truncate(1*time.Millisecond)
+}
+
+func (e stageEx) String() string {
+  label := fmt.Sprintf("%s %s", e.label(), reasonableDuration(time.Now().Sub(e.fence)).String())
+  if e.stalled {
+    label = fmt.Sprintf("[%s](fg:black,bg:blue)", label)
+  }
+  return label
 }
 
 func selectedTitle(s bool, t string) string {
@@ -135,11 +180,72 @@ func selectedTitle(s bool, t string) string {
   return t
 }
 
-func populateRows(l *client.List, r []string) {
-  rows := make([]fmt.Stringer, len(r))
-  for i, row := range r {
-    rows[i] = nodeType(row)
+func filterEmpty(r []string) []string {
+  // have to filter for empty string, which match can be
+  names := r[:0]
+  for _, name := range r {
+    if name != "" {
+      names = append(names, name)
+    }
   }
+  return names
+}
+
+type byExec func(e1, e2 fmt.Stringer) bool
+
+func (by byExec) Sort(executions []fmt.Stringer) {
+  es := &execSorter{
+    executions: executions,
+    by: by,
+  }
+  sort.Sort(es)
+}
+
+type execSorter struct {
+  executions []fmt.Stringer
+  by byExec // func(e1, e2 *string) bool // Closure used in the Less method.
+}
+
+func (s *execSorter) Len() int {
+  return len(s.executions)
+}
+
+func (s *execSorter) Swap(i, j int) {
+  s.executions[i], s.executions[j] = s.executions[j], s.executions[i]
+}
+
+// Less is part of sort.Interface. It is implemented by calling the "by" closure in the sorter.
+func (s *execSorter) Less(i, j int) bool {
+  return !s.by(s.executions[i], s.executions[j])
+}
+
+func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
+  r = filterEmpty(r)
+  rows := make([]fmt.Stringer, len(r))
+  for i, name := range r {
+    ex := &stageEx{field: func() int { return v.field }, name: name}
+    op, ok := v.a.Ops[name]
+    if ok {
+      stalled, fence, err := stageFenced(op, stage)
+      if err != nil {
+        panic(err)
+      }
+      ex.stalled, ex.fence = stalled, fence
+      m := client.RequestMetadata(op)
+      ex.target = m.TargetId
+      ex.mnemonic = m.ActionMnemonic
+      ex.build = m.CorrelatedInvocationsId
+    }
+    rows[i] = ex
+  }
+  fence := func(e1, e2 fmt.Stringer) bool {
+    stageEx1, stageEx2 := e1.(*stageEx), e2.(*stageEx)
+    if stageEx1.stalled != stageEx2.stalled {
+      return stageEx2.stalled != v.reversed
+    }
+    return (stageEx1.fence.Compare(stageEx2.fence) < 0) != v.reversed
+  }
+  byExec(fence).Sort(rows)
   l.Rows = rows
 }
 
@@ -159,6 +265,52 @@ func opMatchesStage(op *longrunning.Operation, stage *bfpb.StageInformation) (bo
   return false, errors.New("Unknown stage: " + stage.Name)
 }
 
+func stageFenced(op *longrunning.Operation, stage string) (bool, time.Time, error) {
+  eam, err := client.ExecutedActionMetadata(op)
+  if err == nil && eam == nil {
+    err = errors.New(fmt.Sprintf("%s: %s, ExecutedActionMetadata is nil", stage, op.Name))
+  }
+  if err != nil {
+    return false, time.Time{}, err
+  }
+  var st, ct time.Time
+  stalled := false
+  switch stage {
+  case "MatchStage":
+    st, _ = ptypes.Timestamp(eam.WorkerStartTimestamp)
+    ct, _ = ptypes.Timestamp(eam.InputFetchStartTimestamp)
+  case "InputFetchStage":
+    st, _ = ptypes.Timestamp(eam.InputFetchStartTimestamp)
+    ct, _ = ptypes.Timestamp(eam.InputFetchCompletedTimestamp)
+  case "ExecuteActionStage":
+    st, _ = ptypes.Timestamp(eam.ExecutionStartTimestamp)
+    ct, _ = ptypes.Timestamp(eam.ExecutionCompletedTimestamp)
+  case "ReportResultStage":
+    st, _ = ptypes.Timestamp(eam.OutputUploadStartTimestamp)
+    ct, _ = ptypes.Timestamp(eam.OutputUploadCompletedTimestamp)
+  }
+  fence := st
+  if ct.Compare(st) > 0 {
+    stalled = true
+    fence = ct
+  }
+  return stalled, fence, nil
+}
+
+func getExecution(a *client.App, name string, conn *grpc.ClientConn, wg *sync.WaitGroup) {
+  defer wg.Done()
+
+  c := longrunning.NewOperationsClient(conn)
+  o, err := c.GetOperation(context.Background(), &longrunning.GetOperationRequest {
+    Name: name,
+  })
+  if err == nil {
+    a.Mutex.Lock()
+    a.Ops[name] = o
+    a.Mutex.Unlock()
+  }
+}
+
 func (v worker) Render() []ui.Drawable {
   v.title.Text = fmt.Sprintf(
       "%s CAS Count: %d Size: %s (%d%%) Unref: %d%%",
@@ -173,43 +325,64 @@ func (v worker) Render() []ui.Drawable {
 
   // need some expander logic
 
-  c := longrunning.NewOperationsClient(v.a.Conn)
+  now := time.Now()
+
+  v.a.Fetches = 0
+
+  var wg sync.WaitGroup
   for _, stage := range v.profile.Stages {
     // for all operations in stages
     for _, name := range stage.OperationNames {
       // if operation not in cache, fetch it
       fetch := false
-      if op, ok := v.a.Ops[name]; !ok {
-        fetch = true
-      // if stage is not the operation current stage, fetch it
-      } else if op != nil {
+      if name == "" {
+        continue
+      }
+      if op, ok := v.a.Ops[name]; ok {
         match, err := opMatchesStage(op, stage)
         if err != nil {
           panic(err)
         }
+        if match {
+          stalled, fence, _ := stageFenced(op, stage.Name)
+          if !stalled {
+            fenced := now.Sub(fence)
+            if last, ok := v.fetches[name]; ok {
+              deadline := 1.0
+              if fenced.Minutes() >= 1 {
+                deadline = 10.0
+              }
+              match = now.Sub(last).Seconds() < deadline
+            }
+          }
+        }
         fetch = !match
+      } else {
+        fetch = true
+        // if stage is not the operation current stage, fetch it
       }
       if fetch {
-        o, _ := c.GetOperation(context.Background(), &longrunning.GetOperationRequest {
-          Name: name,
-        })
-        v.a.Ops[name] = o
+        v.a.Fetches++
+        v.fetches[name] = now
+        wg.Add(1)
+        go getExecution(v.a, name, v.a.Conn, &wg)
       }
     }
+    wg.Wait() // really needs to move to Update
 
     switch stage.Name {
     case "MatchStage":
-      populateRows(v.match, stage.OperationNames)
+      v.populateExecutions(v.match, stage.Name, stage.OperationNames)
     case "InputFetchStage":
       v.inputFetch.Title = fmt.Sprintf(selectedTitle(v.inputFetch.SelectedRow != -1, "InputFetch") + " %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
-      populateRows(v.inputFetch, stage.OperationNames)
+      v.populateExecutions(v.inputFetch, stage.Name, stage.OperationNames)
     case "ExecuteActionStage":
       v.execute.Title = fmt.Sprintf(selectedTitle(v.execute.SelectedRow != -1, "Execute") + " %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
       // TODO get some time spent doing this
-      populateRows(v.execute, stage.OperationNames)
+      v.populateExecutions(v.execute, stage.Name, stage.OperationNames)
     case "ReportResultStage":
       v.reportResult.Title = fmt.Sprintf(selectedTitle(v.reportResult.SelectedRow != -1, "Report Result") + " %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
-      populateRows(v.reportResult, stage.OperationNames)
+      v.populateExecutions(v.reportResult, stage.Name, stage.OperationNames)
     }
   }
 

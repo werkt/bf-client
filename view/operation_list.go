@@ -3,15 +3,14 @@ package view
 import (
   "context"
   "fmt"
+  "sync"
   "time"
 
-  reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   ui "github.com/gizak/termui/v3"
-  "github.com/gizak/termui/v3/widgets"
-  "github.com/golang/protobuf/ptypes"
   "github.com/hashicorp/golang-lru/v2"
   "github.com/werkt/bf-client/client"
+  "github.com/golang/protobuf/ptypes"
   "google.golang.org/genproto/googleapis/longrunning"
 )
 
@@ -19,22 +18,25 @@ type operation struct {
   target string
   mnemonic string
   build string
+  workerStart time.Time
 }
 
 type operationList struct {
+  list *client.List
   Filter string
   a *client.App
   ops []string
   opcache *lru.Cache[string, operation]
   mode int
-  selected int
   v View
   field int
+  reversed bool
   queues []*client.Queue
+  fetchToken string
 }
 
 func NewOperationList(a *client.App, mode int, v View) *operationList {
-  opcache, _ := lru.New[string, operation](60)
+  opcache, _ := lru.New[string, operation](1024)
   var queues []*client.Queue
   if mode != 3 {
     c := bfpb.NewOperationQueueClient(a.Conn)
@@ -59,13 +61,15 @@ func NewOperationList(a *client.App, mode int, v View) *operationList {
     }
   }
   return &operationList {
+    list: client.NewList(),
     a: a,
     mode: mode,
-    selected: 0,
     opcache: opcache,
     field: 0,
+    reversed: false,
     v: v,
     queues: queues,
+    fetchToken: "",
   }
 }
 
@@ -80,16 +84,15 @@ func (v operationList) fetchQueues(max int64, cb func(string) (*client.Operation
   return ops
 }
 
-func (v operationList) fetchFiltered() []*client.Operation {
+func (v operationList) fetchFiltered(filter string) []*client.Operation {
   var ops []*client.Operation
-  var nextPageToken, pageToken string
   c := longrunning.NewOperationsClient(v.a.Conn)
-  for nextPageToken, pageToken = "initial", ""; len(ops) < 20 && nextPageToken != ""; pageToken = nextPageToken {
+  for nextPageToken := "initial"; nextPageToken != ""; v.fetchToken = nextPageToken {
     r, err := c.ListOperations(context.Background(), &longrunning.ListOperationsRequest {
-      Name: "<instance>/operations",
-      Filter: v.Filter,
-      PageSize: 20,
-      PageToken: pageToken,
+      Name: fmt.Sprintf("%s/executions", v.a.Instance),
+      Filter: filter,
+      PageSize: 100,
+      PageToken: v.fetchToken,
     })
     if err != nil {
       panic(err)
@@ -99,57 +102,6 @@ func (v operationList) fetchFiltered() []*client.Operation {
       ops = append(ops, &client.Operation{ Name: op.Name })
     }
     nextPageToken = r.NextPageToken
-  }
-
-  for _, op := range ops {
-    if _, ok := v.a.Metadatas[op.Name]; !ok {
-      v.a.Fetches++
-      o, err := c.GetOperation(context.Background(), &longrunning.GetOperationRequest {
-        Name: op.Name,
-      })
-      if err != nil {
-        continue
-      }
-      op.Metadata = getRequestMetadata(o)
-    }
-    if v.a.Fetches > 10 {
-      break
-    }
-  }
-  return ops
-}
-
-func (v operationList) fetchDispatched() []*client.Operation {
-  var ops []*client.Operation
-  var nextCursor, cursor uint64
-  for nextCursor, cursor = 1, 0; len(ops) < 20 && nextCursor != 0; cursor = nextCursor {
-    var opsPage []string
-    var err error
-    opsPage, nextCursor, err = v.a.Client.HScan(context.Background(), "DispatchedOperations", cursor, "*", 20).Result()
-    if err != nil {
-      panic(err)
-    }
-    for i, op := range opsPage {
-      if i % 2 == 0 {
-        ops = append(ops, &client.Operation { Name: op })
-      }
-    }
-  }
-  c := longrunning.NewOperationsClient(v.a.Conn)
-  for _, op := range ops {
-    if _, ok := v.a.Metadatas[op.Name]; !ok {
-      v.a.Fetches++
-      o, err := c.GetOperation(context.Background(), &longrunning.GetOperationRequest {
-        Name: op.Name,
-      })
-      if err != nil {
-        continue
-      }
-      op.Metadata = getRequestMetadata(o)
-    }
-    if v.a.Fetches > 10 {
-      break
-    }
   }
   return ops
 }
@@ -170,28 +122,16 @@ func (v operationList) fetch() []*client.Operation {
   switch v.mode {
   case 1: return v.fetchQueues(20, client.ParsePrequeueName)
   case 2: return v.fetchQueues(20, client.ParseQueueName)
-  case 3: return v.fetchDispatched()
-  case 4: return v.fetchFiltered()
+  case 3: return v.fetchFiltered("status=dispatched")
+  case 4: return v.fetchFiltered(v.Filter)
   default:
     return make([]*client.Operation, 0)
   }
 }
 
-func (v operationList) length() int64 {
-  client := v.a.Client
-  switch v.selected {
-  case 1, 2: return v.queuesLength()
-  case 3:
-    length := client.HLen(context.Background(), "DispatchedOperations").Val()
-    return length
-  default:
-    return 0
-  }
-}
-
 func (v *operationList) createOperationView() View {
   if len(v.ops) > 0 {
-    return NewOperation(v.a, v.ops[v.selected], v)
+    return NewOperation(v.a, v.list.Rows[v.list.SelectedRow].(*stageEx).name, v)
   }
   return v
 }
@@ -202,11 +142,9 @@ func (v *operationList) Handle(e ui.Event) View {
     ui.Clear()
     return v.v
   case "j", "<Down>":
-    v.selected++
-    v.selected %= 20
+    v.list.ScrollDown()
   case "k", "<Up>":
-    v.selected += 19
-    v.selected %= 20
+    v.list.ScrollUp()
   case "h", "<Left>":
     v.field += 3
     v.field %= 4
@@ -216,6 +154,8 @@ func (v *operationList) Handle(e ui.Event) View {
   case "<Enter>":
     ui.Clear()
     return v.createOperationView()
+  case ">", "<":
+    v.reversed = !v.reversed
   }
   return v
 }
@@ -224,16 +164,39 @@ func (v *operationList) Update() {
   v.a.Fetches++
   ops := v.fetch()
 
+  var wg sync.WaitGroup
+  for _, op := range ops {
+    if v.opcache.Contains(op.Name) {
+      continue
+    }
+    if o, ok := v.a.Ops[op.Name]; !ok || o == nil {
+      m := op.Metadata
+      if m == nil {
+        v.a.Fetches++
+        wg.Add(1)
+        go getExecution(v.a, op.Name, v.a.Conn, &wg)
+      }
+    }
+  }
+  wg.Wait()
   v.ops = make([]string, 0)
   for _, op := range ops {
-    v.ops = append(v.ops, op.Name)
-    if _, ok := v.a.Ops[op.Name]; !ok {
-      m := op.Metadata
+    if v.opcache.Contains(op.Name) {
+      v.ops = append(v.ops, op.Name)
+    } else if o, ok := v.a.Ops[op.Name]; ok && o != nil {
+      v.ops = append(v.ops, op.Name)
+      m := client.RequestMetadata(o)
       if m != nil {
+        eam, err := client.ExecutedActionMetadata(o)
+        var workerStart time.Time
+        if err == nil {
+          workerStart, _ = ptypes.Timestamp(eam.WorkerStartTimestamp)
+        }
         v.opcache.Add(op.Name, operation {
           build: m.CorrelatedInvocationsId,
           target: m.TargetId,
           mnemonic: m.ActionMnemonic,
+          workerStart: workerStart,
         })
         v.a.Ops[op.Name] = nil
         v.a.Metadatas[op.Name] = op.Metadata
@@ -260,68 +223,33 @@ func (v operationList) modeTitle() string {
 }
 
 func (v operationList) Render() []ui.Drawable {
-  ops := widgets.NewList()
   fields := [...]string{"name", "target", "build", "mnemonic"}
-  ops.Title = fmt.Sprintf("%s Operations (%s)", v.modeTitle(), fields[v.field])
-  ops.Rows = make([]string, 20)
-  for i := 0; i < 20 && i < len(v.ops); i++ {
+  v.list.Title = fmt.Sprintf("%s Operations (%s) %d", v.modeTitle(), fields[v.field], len(v.ops))
+  rows := make([]fmt.Stringer, len(v.ops))
+  for i := 0; i < len(v.ops); i++ {
     name := v.ops[i]
-    var row string
-    if v.field == 0 {
-      row = name
-    } else {
-      op, _ := v.opcache.Get(name)
-      if v.field == 1 {
-        row = op.target
-      } else if v.field == 2 {
-        row = op.build
-      } else if v.field == 3 {
-        row = op.mnemonic
-      }
+    op, ok := v.opcache.Get(name)
+    if !ok {
+      panic("opcache didn't contain: " + name)
     }
-    ops.Rows[i] = row
-  }
-  ops.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
-  ops.SelectedRow = v.selected
-  ops.WrapText = false
-  ops.SetRect(0, 0, 80, 30)
-
-  return []ui.Drawable { ops }
-}
-
-func getRequestMetadata(o *longrunning.Operation) *reapi.RequestMetadata {
-  m := o.Metadata
-  em := &reapi.ExecuteOperationMetadata{}
-  qm := &bfpb.QueuedOperationMetadata{}
-  if ptypes.Is(m, em) {
-    return nil
-  } else if ptypes.Is(m, qm) {
-    if err := ptypes.UnmarshalAny(m, qm); err != nil {
-      return nil
-    } else {
-      return qm.RequestMetadata
-    }
-  } else {
-    return nil
-  }
-}
-
-func getExecutedActionMetadata(o *longrunning.Operation) *reapi.ExecutedActionMetadata {
-  switch r := o.Result.(type) {
-  case *longrunning.Operation_Response:
-    er := &reapi.ExecuteResponse{}
-    if ptypes.Is(r.Response, er) {
-      if err := ptypes.UnmarshalAny(r.Response, er); err != nil && er.Result != nil {
-        return er.Result.ExecutionMetadata
-      }
+    rows[i] = &stageEx{
+      field: func () int { return v.field },
+      name: name,
+      fence: op.workerStart,
+      target: op.target,
+      mnemonic: op.mnemonic,
+      build: op.build,
     }
   }
-
-  em := &reapi.ExecuteOperationMetadata{}
-  if ptypes.Is(o.Metadata, em) {
-    if err := ptypes.UnmarshalAny(o.Metadata, em); err != nil {
-      return em.PartialExecutionMetadata
-    }
+  v.list.Rows = rows
+  fence := func(e1, e2 fmt.Stringer) bool {
+    stageEx1, stageEx2 := e1.(*stageEx), e2.(*stageEx)
+    return (stageEx1.fence.Compare(stageEx2.fence) < 0) != v.reversed
   }
-  return nil
+  byExec(fence).Sort(v.list.Rows)
+  v.list.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
+  v.list.WrapText = false
+  v.list.SetRect(0, 0, 80, 30)
+
+  return []ui.Drawable { v.list }
 }

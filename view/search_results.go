@@ -119,10 +119,14 @@ func (e ex) label(r opRow) string {
 }
 
 func newEx(o *longrunning.Operation) *ex {
+  e, err := client.ExecutedActionMetadata(o)
+  if err != nil {
+    panic(err)
+  }
   return &ex {
     op: *newOp(o),
-    m: getRequestMetadata(o),
-    e: getExecutedActionMetadata(o),
+    m: client.RequestMetadata(o),
+    e: e,
   }
 }
 
@@ -275,7 +279,7 @@ func (s *searchResults) Update() {
         op = newEx(o)
       }
 
-      s.opRows = append(s.opRows, &opRow{s: s, o: op, m: getRequestMetadata(o)})
+      s.opRows = append(s.opRows, &opRow{s: s, o: op, m: client.RequestMetadata(o)})
     }
   } else if s.fetchDetailsIndex != -1 {
     s.a.Fetches++

@@ -6,7 +6,6 @@ import (
   "regexp"
   "strings"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
-  reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   redis "github.com/redis/go-redis/v9"
   "github.com/golang/protobuf/jsonpb"
 )
@@ -75,11 +74,6 @@ func (q *Queue) Length(ctx context.Context, c *UnifiedRedis) (int64, error) {
     sum += len.Val()
   }
   return sum, nil
-}
-
-type Operation struct {
-  Name string
-  Metadata *reapi.RequestMetadata
 }
 
 func ParsePrequeueName(json string) (*Operation, error) {
