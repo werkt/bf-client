@@ -329,7 +329,7 @@ func (v worker) Render() []ui.Drawable {
 
   v.a.Fetches = 0
 
-  var wg sync.WaitGroup
+  fetches := make([]string, 0)
   for _, stage := range v.profile.Stages {
     // for all operations in stages
     for _, name := range stage.OperationNames {
@@ -364,9 +364,13 @@ func (v worker) Render() []ui.Drawable {
       if fetch {
         v.a.Fetches++
         v.fetches[name] = now
-        wg.Add(1)
-        go getExecution(v.a, name, v.a.Conn, &wg)
+        fetches = append(fetches, name)
       }
+    }
+    wg := sync.WaitGroup {}
+    wg.Add(len(fetches))
+    for _, name := range fetches {
+      go getExecution(v.a, name, v.a.Conn, &wg)
     }
     wg.Wait() // really needs to move to Update
 
