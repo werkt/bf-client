@@ -30,6 +30,7 @@ go_library(
         "@org_golang_google_genproto_googleapis_bytestream//:go_default_library",
         "@org_golang_google_grpc//:go_default_library",
         "@org_golang_google_grpc//credentials:go_default_library",
+        "@org_golang_google_grpc//credentials/insecure:go_default_library",
         "@remoteapis//build/bazel/remote/execution/v2:go_default_library",
     ],
 )
