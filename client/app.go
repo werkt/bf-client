@@ -12,6 +12,7 @@ import (
   "google.golang.org/genproto/googleapis/longrunning"
   "google.golang.org/grpc"
   "google.golang.org/grpc/credentials"
+  "google.golang.org/grpc/credentials/insecure"
 )
 
 type App struct {
@@ -70,7 +71,7 @@ func connect(host string, ca string) *grpc.ClientConn {
     }
     opts = []grpc.DialOption{grpc.WithTransportCredentials(creds)}
   } else {
-    opts = []grpc.DialOption{grpc.WithInsecure()}
+    opts = []grpc.DialOption{grpc.WithTransportCredentials(insecure.NewCredentials())}
   }
   conn, err := grpc.Dial(host, opts...)
   if err != nil {
