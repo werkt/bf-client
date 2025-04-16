@@ -263,7 +263,7 @@ func (v *Queue) Update() {
   v.a.LastReapiLatency = time.Since(start)
   if err == nil {
     s.status = *st
-    s.workers = st.ActiveWorkers;
+    s.workers = st.ActiveExecuteWorkers;
   } else {
     panic(err)
     st, ok := status.FromError(err)
