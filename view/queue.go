@@ -570,7 +570,15 @@ func countBar(used int, slots int) string {
   if slots == 0 {
     return fmt.Sprintf("# %d #", used)
   }
-  return fmt.Sprintf("# %d/%d #", used, slots)
+  var format_string string
+  if slots < 10 {
+    format_string = "# %d/%d #"
+  } else if slots < 100 {
+    format_string = "# %2d/%2d #"
+  } else {
+    format_string = "# %3d/%3d #"
+  }
+  return fmt.Sprintf(format_string, used, slots)
 }
 
 func renderWorkerRow(r *profileResult, wl int, view int) Worker {
@@ -581,6 +589,7 @@ func renderWorkerRow(r *profileResult, wl int, view int) Worker {
   profile = r.profile
   var input_fetch_used, input_fetch_slots int
   var execute_action_used, execute_action_slots int
+  var report_result_used, report_result_slots int
   for _, stage := range profile.Stages {
     if stage.Name == "InputFetchStage" {
       input_fetch_used = int(stage.SlotsUsed)
@@ -593,6 +602,9 @@ func renderWorkerRow(r *profileResult, wl int, view int) Worker {
         execute_action_used = len(stage.OperationNames)
         execute_action_slots = 0
       }
+    } else if stage.Name == "ReportResultStage" {
+      report_result_used = int(stage.SlotsUsed)
+      report_result_slots = int(stage.SlotsConfigured)
     }
   }
   name := r.name
@@ -628,7 +640,13 @@ func renderWorkerRow(r *profileResult, wl int, view int) Worker {
     row += executeCountBar + "]("
     executeCount = true
   } else {
-    row += strings.Repeat("#", execute_action_used) + "]("
+    width := Min(execute_action_slots, len(executeCountBar))
+    row += strings.Repeat("#", execute_action_used)
+    padding := width - execute_action_used
+    if padding > 0 {
+      row += strings.Repeat(" ", padding)
+    }
+    row += "]("
   }
   execute_color := "red"
   if view == 1 {
@@ -638,6 +656,14 @@ func renderWorkerRow(r *profileResult, wl int, view int) Worker {
     row += "fg:black,mod:dim,bg:" + execute_color
   } else {
     row += "fg:" + execute_color
+  }
+  row += ")["
+  row += strings.Repeat("#", report_result_used)
+  row += strings.Repeat(" ", report_result_slots - report_result_used) + "]("
+  if report_result_used == report_result_slots {
+    row += "fg:black,mod:dim,bg:green"
+  } else {
+    row += "fg:green"
   }
   row += ")"
   if !executeCount {
