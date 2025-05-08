@@ -12,7 +12,6 @@ import (
   ui "github.com/gizak/termui/v3"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   "github.com/werkt/bf-client/client"
-  "google.golang.org/grpc"
   "google.golang.org/grpc/codes"
   "google.golang.org/grpc/status"
 )
