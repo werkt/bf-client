@@ -14,7 +14,6 @@ import (
   ui "github.com/gizak/termui/v3"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   "github.com/werkt/bf-client/client"
-  "google.golang.org/grpc"
   "google.golang.org/grpc/codes"
   "google.golang.org/grpc/status"
 )
@@ -264,7 +263,7 @@ func (v *Queue) Update() {
       var wg sync.WaitGroup
       for _, worker := range s.workers {
         wg.Add(1)
-        go fetchProfile(v, worker, v.a.GetWorkerConn(worker, v.a.CA), &wg)
+        go fetchProfile(v, worker, &wg)
       }
       wg.Wait()
     }
@@ -410,13 +409,14 @@ func (v Queue) Render() []ui.Drawable {
   return []ui.Drawable{ p, v.stats, info }
 }
 
-func fetchProfile(v *Queue, worker string, conn *grpc.ClientConn, wg *sync.WaitGroup) {
+func fetchProfile(v *Queue, worker string, wg *sync.WaitGroup) {
   defer wg.Done()
 
-  workerProfile := bfpb.NewWorkerProfileClient(conn)
+  workerProfile := bfpb.NewWorkerProfileClient(v.a.Conn)
+
   clientDeadline := time.Now().Add(time.Millisecond * 30)
   ctx, _ := context.WithDeadline(context.Background(), clientDeadline)
-  profile, err := workerProfile.GetWorkerProfile(ctx, &bfpb.WorkerProfileRequest {})
+  profile, err := workerProfile.GetWorkerProfile(ctx, &bfpb.WorkerProfileRequest {WorkerName: worker})
   if err == nil {
     v.s.mutex.Lock()
     v.s.profiles[worker] = &profileResult {name: worker, profile: profile, stale: 0, message: ""}
