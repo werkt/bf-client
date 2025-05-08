@@ -4,7 +4,7 @@ import (
   "crypto/x509"
   "crypto/tls"
   "fmt"
-  "io/ioutil"
+  "os"
   "strings"
   "sync"
   "time"
@@ -82,7 +82,7 @@ func connect(host string, ca string) *grpc.ClientConn {
 
 func loadTLSCredentials(ca string) (credentials.TransportCredentials, error) {
   // Load certificate of the CA who signed server's certificate
-  pemServerCA, err := ioutil.ReadFile(ca)
+  pemServerCA, err := os.ReadFile(ca)
   if err != nil {
     return nil, err
   }
