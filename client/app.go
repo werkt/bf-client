@@ -69,7 +69,10 @@ func (a *App) Connect() {
 func connect(host string, ca string) *grpc.ClientConn {
   var opts []grpc.DialOption
   if strings.HasPrefix(host, "grpcs://") {
-    host = host[8:] + ":443"
+    host = host[8:]
+    if !strings.Contains(host, ":") {
+      host = host + ":443"
+    }
     creds, err := loadTLSCredentials(ca)
     if err != nil {
       panic(err)
