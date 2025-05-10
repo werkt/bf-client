@@ -1,1 +1,6 @@
 build --experimental_google_legacy_api
+
+
+# Stop recompiling protoc.
+# https://fzakaria.com/2024/10/23/bazel-knowledge-mind-your-path.html
+build --incompatible_strict_action_env
