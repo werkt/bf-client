@@ -272,57 +272,66 @@ func renderExecutedActionMetadata(em *reapi.ExecutedActionMetadata, workerSelect
   }
   var qt, wst, wct, ifst, ifct, est, ect, oust, ouct time.Time
   var err error
-  if qt, err = ptypes.Timestamp(em.QueuedTimestamp); err != nil {
+  if err = em.QueuedTimestamp.CheckValid(); err != nil {
     text += err.Error() + "\n"
     return text
   }
+  qt = em.QueuedTimestamp.AsTime()
   if em.WorkerStartTimestamp != nil {
-    if wst, err = ptypes.Timestamp(em.WorkerStartTimestamp); err != nil {
+    if err = em.WorkerStartTimestamp.CheckValid(); err != nil {
       text += err.Error() + "\n"
       return text
     }
+    wst = em.WorkerStartTimestamp.AsTime()
   }
   if em.WorkerCompletedTimestamp != nil {
-    if wct, err = ptypes.Timestamp(em.WorkerCompletedTimestamp); err != nil {
+    if err = em.WorkerCompletedTimestamp.CheckValid(); err != nil {
       text += err.Error() + "\n"
       return text
     }
+    wct = em.WorkerCompletedTimestamp.AsTime()
   }
   if em.InputFetchStartTimestamp != nil {
-    if ifst, err = ptypes.Timestamp(em.InputFetchStartTimestamp); err != nil {
+    if err = em.InputFetchStartTimestamp.CheckValid(); err != nil {
       text += err.Error() + "\n"
       return text
     }
+    ifst = em.InputFetchStartTimestamp.AsTime()
   }
   if em.InputFetchCompletedTimestamp != nil {
-    if ifct, err = ptypes.Timestamp(em.InputFetchCompletedTimestamp); err != nil {
+    if err = em.InputFetchCompletedTimestamp.CheckValid(); err != nil {
       text += err.Error() + "\n"
       return text
     }
+    ifct = em.InputFetchCompletedTimestamp.AsTime()
   }
   if em.ExecutionStartTimestamp != nil {
-    if est, err = ptypes.Timestamp(em.ExecutionStartTimestamp); err != nil {
+    if err = em.ExecutionStartTimestamp.CheckValid(); err != nil {
       text += err.Error() + "\n"
       return text
     }
+    est = em.ExecutionStartTimestamp.AsTime()
   }
   if em.ExecutionCompletedTimestamp != nil {
-    if ect, err = ptypes.Timestamp(em.ExecutionCompletedTimestamp); err != nil {
+    if err = em.ExecutionCompletedTimestamp.CheckValid(); err != nil {
       text += err.Error() + "\n"
       return text
     }
+    ect = em.ExecutionCompletedTimestamp.AsTime()
   }
   if em.OutputUploadStartTimestamp != nil {
-    if oust, err = ptypes.Timestamp(em.OutputUploadStartTimestamp); err != nil {
+    if err = em.OutputUploadStartTimestamp.CheckValid(); err != nil {
       text += err.Error() + "\n"
       return text
     }
+    oust = em.OutputUploadStartTimestamp.AsTime()
   }
   if em.OutputUploadCompletedTimestamp != nil {
-    if ouct, err = ptypes.Timestamp(em.OutputUploadCompletedTimestamp); err != nil {
+    if err = em.OutputUploadCompletedTimestamp.CheckValid(); err != nil {
       text += err.Error() + "\n"
       return text
     }
+    ouct = em.OutputUploadCompletedTimestamp.AsTime()
   }
   text += fmt.Sprintf("queued at: %s\n", formatTime(qt))
   var qstall time.Duration
