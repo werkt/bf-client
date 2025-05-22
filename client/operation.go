@@ -19,12 +19,12 @@ func ExecuteOperationMetadata(op *longrunning.Operation) (*reapi.ExecuteOperatio
   m := op.Metadata
   em := &reapi.ExecuteOperationMetadata{}
   qm := &bfpb.QueuedOperationMetadata{}
-  if ptypes.Is(m, em) {
+  if m.MessageIs(em) {
     if err := ptypes.UnmarshalAny(m, em); err != nil {
       return nil, err
     }
     return em, nil
-  } else if ptypes.Is(m, qm) {
+  } else if m.MessageIs(qm) {
     if err := ptypes.UnmarshalAny(m, qm); err != nil {
       return nil, err
     }
@@ -37,9 +37,9 @@ func RequestMetadata(o *longrunning.Operation) *reapi.RequestMetadata {
   m := o.Metadata
   em := &reapi.ExecuteOperationMetadata{}
   qm := &bfpb.QueuedOperationMetadata{}
-  if ptypes.Is(m, em) {
+  if m.MessageIs(em) {
     return nil
-  } else if ptypes.Is(m, qm) {
+  } else if m.MessageIs(qm) {
     if err := ptypes.UnmarshalAny(m, qm); err != nil {
       return nil
     } else {
@@ -54,7 +54,7 @@ func ExecutedActionMetadata(o *longrunning.Operation) (*reapi.ExecutedActionMeta
   switch r := o.Result.(type) {
   case *longrunning.Operation_Response:
     er := &reapi.ExecuteResponse{}
-    if ptypes.Is(r.Response, er) {
+    if r.Response.MessageIs(er) {
       err := ptypes.UnmarshalAny(r.Response, er)
       if err == nil && er.Result != nil {
         if er.Result.ExecutionMetadata == nil {
