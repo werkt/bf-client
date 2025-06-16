@@ -4,6 +4,8 @@ import (
   "container/list"
   "context"
   "fmt"
+  "maps"
+  "slices"
   "strings"
   "sort"
   "sync"
@@ -18,8 +20,10 @@ import (
 )
 
 var workersSorts = []string{"Executions", "Name"}
+var workersViews = []string{"Slots", "Actions"}
 
 type profileResult struct {
+  name string
   profile *bfpb.WorkerProfileMessage
   stale int
   message string
@@ -65,18 +69,20 @@ type Queue struct {
   queue numValue
   dispatched numValue
   workersSort int
+  workersView int
+  settings *settings
 }
 
 func statNode(nv *numValue) *client.TreeNode {
   return &client.TreeNode{ Value: nv, }
 }
 
-type workersSort struct {
+type workersTitle struct {
   q *Queue
 }
 
-func (s workersSort) String() string {
-  return workersSorts[s.q.workersSort]
+func (s workersTitle) String() string {
+  return fmt.Sprintf(">%s< %s", workersSorts[s.q.workersSort], workersViews[s.q.workersView])
 }
 
 func NewQueue(a *client.App, selected int) *Queue {
@@ -99,7 +105,7 @@ func NewQueue(a *client.App, selected int) *Queue {
     dispatched: numValue{ fmt: "Dispatched: %v", mode: 3 },
     workersSort: 0,
   }
-  meter.SubTitle = &workersSort { q: q } 
+  meter.SubTitle = &workersTitle { q: q } 
   q.stats.Focused = true
   q.stats.SelectedRow = selected
   q.stats.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
@@ -153,6 +159,8 @@ func (v *Queue) Handle(e ui.Event) View {
         v.meter.SelectedRow = -1
       }
     }
+  case "s":
+    return newSettings(v.a, v)
   case "H", "<S-Left>":
     n := v.stats.SelectedNode()
     for _, cn := range n.Nodes {
@@ -187,10 +195,17 @@ func (v *Queue) Handle(e ui.Event) View {
       ui.Clear()
       return NewOperationList(v.a, v.stats.SelectedNode().Value.(*numValue).mode, v)
     }
+  case "D":
+    return NewDocument(v.a, "test", v)
   case "/":
     return NewSearch(v.a, v)
   case "T":
     return NewTest(v.a, v)
+  case "<Tab>":
+    if v.stats.SelectedRow == 0 {
+      v.workersView++
+      v.workersView %= len(workersViews)
+    }
   case ">":
     if v.stats.SelectedRow == 0 {
       v.workersSort++
@@ -353,7 +368,7 @@ func (v Queue) Render() []ui.Drawable {
 
   var info ui.Drawable
   if v.stats.SelectedRow == 0 {
-    info = renderWorkersInfo(&s, v.meter, d.width, v.h, v.workersSort)
+    info = renderWorkersInfo(&s, v.meter, d.width, v.h, v.workersSort, v.workersView)
   } else {
     plot := widgets.NewPlot()
     plot.Data = make([][]float64, 1)
@@ -406,7 +421,7 @@ func fetchProfile(v *Queue, worker string, conn *grpc.ClientConn, wg *sync.WaitG
   profile, err := workerProfile.GetWorkerProfile(ctx, &bfpb.WorkerProfileRequest {})
   if err == nil {
     v.s.mutex.Lock()
-    v.s.profiles[worker] = &profileResult {profile: profile, stale: 0, message: ""}
+    v.s.profiles[worker] = &profileResult {name: worker, profile: profile, stale: 0, message: ""}
     v.s.mutex.Unlock()
   } else {
     st, ok := status.FromError(err)
@@ -414,7 +429,7 @@ func fetchProfile(v *Queue, worker string, conn *grpc.ClientConn, wg *sync.WaitG
     if !ok || st.Code() != codes.DeadlineExceeded {
       result := v.s.profiles[worker]
       if result == nil {
-        v.s.profiles[worker] = &profileResult {profile: &bfpb.WorkerProfileMessage{}, stale: 1, message: st.String()}
+        v.s.profiles[worker] = &profileResult {name: worker, profile: &bfpb.WorkerProfileMessage{}, stale: 1, message: st.String()}
       } else {
         result.stale++
         result.message = st.String()
@@ -422,7 +437,7 @@ func fetchProfile(v *Queue, worker string, conn *grpc.ClientConn, wg *sync.WaitG
     } else {
       result := v.s.profiles[worker]
       if result == nil {
-        v.s.profiles[worker] = &profileResult {profile: &bfpb.WorkerProfileMessage{}, stale: 1, message: ""}
+        v.s.profiles[worker] = &profileResult {name: worker, profile: &bfpb.WorkerProfileMessage{}, stale: 1, message: ""}
       } else {
         result.stale++
       }
@@ -431,9 +446,9 @@ func fetchProfile(v *Queue, worker string, conn *grpc.ClientConn, wg *sync.WaitG
   }
 }
 
-type by func(w1, w2 *string) bool
+type byProfile func(w1, w2 *profileResult) bool
 
-func (by by) Sort(workers []string) {
+func (by byProfile) Sort(workers []*profileResult) {
   ws := &workerSorter{
     workers: workers,
     by:      by, // The Sort method's receiver is the function (closure) that defines the sort order.
@@ -442,8 +457,8 @@ func (by by) Sort(workers []string) {
 }
 
 type workerSorter struct {
-  workers []string
-  by      func(w1, w2 *string) bool // Closure used in the Less method.
+  workers []*profileResult
+  by      func(w1, w2 *profileResult) bool // Closure used in the Less method.
 }
 
 // Len is part of sort.Interface.
@@ -458,7 +473,7 @@ func (s *workerSorter) Swap(i, j int) {
 
 // Less is part of sort.Interface. It is implemented by calling the "by" closure in the sorter.
 func (s *workerSorter) Less(i, j int) bool {
-  return !s.by(&s.workers[i], &s.workers[j])
+  return !s.by(s.workers[i], s.workers[j])
 }
 
 type Worker struct {
@@ -470,8 +485,54 @@ func (w Worker) String() string {
   return w.row
 }
 
+func sortWorkers(profiles []*profileResult, sort int) []*profileResult {
+  exec_used := func(profileResult *profileResult) int {
+    if profileResult == nil {
+      return -1
+    }
+    profile := profileResult.profile
+    for _, stage := range profile.Stages {
+      if stage.Name == "ExecuteActionStage" {
+        return int(stage.SlotsUsed)
+      }
+    }
+    return 0;
+  }
+  exec_avail := func(profileResult *profileResult) int {
+    if profileResult == nil {
+      return -1
+    }
+    profile := profileResult.profile
+    for _, stage := range profile.Stages {
+      if stage.Name == "ExecuteActionStage" {
+        return int(stage.SlotsConfigured)
+      }
+    }
+    return 0;
+  }
+  exec := func(w1, w2 *profileResult) bool {
+    if exec_used(w1) == exec_used(w2) {
+      if exec_avail(w1) == exec_avail(w2) {
+        return w1.name < w2.name
+      }
+      return exec_avail(w1) < exec_avail(w2)
+    }
+    return exec_used(w1) < exec_used(w2)
+  }
+  name := func(w1, w2 *profileResult) bool {
+    return w1.name < w2.name
+  }
+  if sort == 0 {
+    byProfile(exec).Sort(profiles)
+  } else {
+    byProfile(name).Sort(profiles)
+  }
+
+  return profiles
+}
+
 // List needs work on draw, flip for only background, etc
-func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int) ui.Drawable {
+func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int, view int) ui.Drawable {
   plen := len(s.workers)
 
   meter.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
@@ -486,58 +547,12 @@ func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int) ui.
     }
   }
 
-  // bleh
-
-  exec_used := func(worker *string) int {
-    profileResult := s.profiles[*worker]
-    if profileResult == nil {
-      return -1
-    }
-    profile := profileResult.profile
-    for _, stage := range profile.Stages {
-      if stage.Name == "ExecuteActionStage" {
-        return int(stage.SlotsUsed)
-      }
-    }
-    return 0;
-  }
-  exec_avail := func(worker *string) int {
-    profileResult := s.profiles[*worker]
-    if profileResult == nil {
-      return -1
-    }
-    profile := profileResult.profile
-    for _, stage := range profile.Stages {
-      if stage.Name == "ExecuteActionStage" {
-        return int(stage.SlotsConfigured)
-      }
-    }
-    return 0;
-  }
-  exec := func(w1, w2 *string) bool {
-    if exec_used(w1) == exec_used(w2) {
-      if exec_avail(w1) == exec_avail(w2) {
-        return *w1 < *w2
-      }
-      return exec_avail(w1) < exec_avail(w2)
-    }
-    return exec_used(w1) < exec_used(w2)
-  }
-  name := func(w1, w2 *string) bool {
-    return *w1 < *w2
-  }
-  if sort == 0 {
-    by(exec).Sort(s.workers)
-  } else {
-    by(name).Sort(s.workers)
-  }
-
-  // end sorting
+  profiles := sortWorkers(slices.Collect(maps.Values(s.profiles)), sort)
 
   n := 0
   rows := make([]fmt.Stringer, plen)
-  for _, w := range s.workers {
-    rows[n] = renderWorkerRow(s.profiles[w], w, wl)
+  for _, p := range profiles {
+    rows[n] = renderWorkerRow(p, wl, view)
     n++
   }
   meter.Rows = rows
@@ -547,17 +562,18 @@ func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int) ui.
 
 func countBar(used int, slots int) string {
   // # used/slots #
+  if slots == 0 {
+    return fmt.Sprintf("# %d #", used)
+  }
   return fmt.Sprintf("# %d/%d #", used, slots)
 }
 
-func renderWorkerRow(r *profileResult, w string, wl int) Worker {
+func renderWorkerRow(r *profileResult, wl int, view int) Worker {
   var profile *bfpb.WorkerProfileMessage
   if r == nil {
     r = &profileResult {profile: &bfpb.WorkerProfileMessage{}, stale: 1, message: "uninitialized"}
-    profile = r.profile
-  } else {
-    profile = r.profile
   }
+  profile = r.profile
   var input_fetch_used, input_fetch_slots int
   var execute_action_used, execute_action_slots int
   for _, stage := range profile.Stages {
@@ -565,17 +581,24 @@ func renderWorkerRow(r *profileResult, w string, wl int) Worker {
       input_fetch_used = int(stage.SlotsUsed)
       input_fetch_slots = int(stage.SlotsConfigured)
     } else if stage.Name == "ExecuteActionStage" {
-      execute_action_used = int(stage.SlotsUsed)
-      execute_action_slots = int(stage.SlotsConfigured)
+      if view == 0 {
+        execute_action_used = int(stage.SlotsUsed)
+        execute_action_slots = int(stage.SlotsConfigured)
+      } else {
+        execute_action_used = len(stage.OperationNames)
+        execute_action_slots = 0
+      }
     }
   }
-  row := strings.Repeat(" ", wl - len(w))
-  row += w + ": ["
+  row := strings.Repeat(" ", wl - len(r.name))
+  row += r.name + ": ["
   fetchCountBar := countBar(input_fetch_used, input_fetch_slots)
-  if input_fetch_used > len(fetchCountBar) {
+  maxWidth := len(countBar(input_fetch_slots, input_fetch_slots))
+  if input_fetch_used > maxWidth {
+    row += strings.Repeat(" ", maxWidth - len(fetchCountBar))
     row += fetchCountBar + "]("
   } else {
-    width := Min(input_fetch_slots, len(fetchCountBar))
+    width := Min(input_fetch_slots, maxWidth)
     row += strings.Repeat(" ", width - input_fetch_used)
     row += strings.Repeat("#", input_fetch_used) + "]("
   }
@@ -595,10 +618,14 @@ func renderWorkerRow(r *profileResult, w string, wl int) Worker {
   } else {
     row += strings.Repeat("#", execute_action_used) + "]("
   }
+  execute_color := "red"
+  if view == 1 {
+    execute_color = "yellow"
+  }
   if execute_action_used == execute_action_slots {
-    row += "fg:black,mod:dim,bg:red"
+    row += "fg:black,mod:dim,bg:" + execute_color
   } else {
-    row += "fg:red"
+    row += "fg:" + execute_color
   }
   row += ")"
   if !executeCount {
@@ -611,7 +638,7 @@ func renderWorkerRow(r *profileResult, w string, wl int) Worker {
     }
   }
   return Worker {
-    w: w,
+    w: r.name,
     row: row,
   }
 }

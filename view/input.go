@@ -2,6 +2,7 @@ package view
 
 import (
   "fmt"
+  "sort"
   "github.com/gammazero/deque"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
@@ -14,6 +15,7 @@ import (
 type nodeValue struct {
   name string
   size int
+  digest string
 }
 
 func (nv nodeValue) String() string {
@@ -21,7 +23,7 @@ func (nv nodeValue) String() string {
     return nv.name
   }
   // maybe have N / size if opened
-  return fmt.Sprintf("%s (%d)", nv.name, nv.size)
+  return fmt.Sprintf("%s (%d) %s", nv.name, nv.size, nv.digest)
 }
 
 type inputView struct {
@@ -148,6 +150,34 @@ func fetchDirectory(d bfpb.Digest, q *deque.Deque[reapi.Digest], i map[string]*r
   }
 }
 
+type byWeight func(n1, n2 *client.TreeNode) bool
+
+func (by byWeight) Sort(nodes []*client.TreeNode) {
+  ws := &weightSorter{
+    nodes: nodes,
+    by: by,
+  }
+  sort.Sort(ws)
+}
+
+type weightSorter struct {
+  nodes []*client.TreeNode
+  by byWeight // Closure used in the Less method.
+}
+
+func (s *weightSorter) Len() int {
+  return len(s.nodes)
+}
+
+func (s *weightSorter) Swap(i, j int) {
+  s.nodes[i], s.nodes[j] = s.nodes[j], s.nodes[i]
+}
+
+// Less is part of sort.Interface. It is implemented by calling the "by" closure in the sorter.
+func (s *weightSorter) Less(i, j int) bool {
+  return !s.by(s.nodes[i], s.nodes[j])
+}
+
 func createInputNodes(d *reapi.Directory, dd string, df reapi.DigestFunction_Value, i map[string]*reapi.Directory, sizes map[string]int) []*client.TreeNode {
   nodes := []*client.TreeNode{}
   size := 0
@@ -156,7 +186,7 @@ func createInputNodes(d *reapi.Directory, dd string, df reapi.DigestFunction_Val
     childNodes := createInputNodes(i[child], child, df, i, sizes)
     childSize := sizes[child]
     nodes = append(nodes, &client.TreeNode{
-      Value: nodeValue{name: n.Name, size: childSize},
+      Value: &nodeValue{name: n.Name, size: childSize, digest: child},
       Nodes: childNodes,
     })
     size += childSize
@@ -164,10 +194,15 @@ func createInputNodes(d *reapi.Directory, dd string, df reapi.DigestFunction_Val
   size += len(d.Files)
   for _, n := range d.Files {
     nodes = append(nodes, &client.TreeNode{
-      Value: nodeValue{name: n.Name},
+      Value: &nodeValue{name: n.Name, digest: client.DigestString(client.ToDigest(*n.Digest, df))},
     })
   }
   sizes[dd] = size
+  weight := func(n1, n2 *client.TreeNode) bool {
+    v1, v2 := n1.Value.(*nodeValue), n2.Value.(*nodeValue)
+    return v1.size < v2.size
+  }
+  byWeight(weight).Sort(nodes)
   return nodes
 }
 

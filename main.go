@@ -88,14 +88,24 @@ func main() {
   c.open()
 
   uiEvents := ui.PollEvents()
-  ticker := time.NewTicker(time.Second / 60).C
+  lastFrameLimit := a.FrameLimit
+  ticker := time.NewTicker(time.Second / time.Duration(a.FrameLimit)).C
   for !c.done() {
     select {
     case e := <-uiEvents:
       c.handle(e)
+      if lastFrameLimit != a.FrameLimit {
+        ticker = time.NewTicker(time.Second / time.Duration(a.FrameLimit)).C
+        lastFrameLimit = a.FrameLimit
+      }
     case <-ticker:
-      a.Fetches = 0
-      c = c.update()
+      if a.UpdateCountdown == 0 {
+        a.UpdateCountdown = a.SkipFrames
+        a.Fetches = 0
+        c = c.update()
+      } else {
+        a.UpdateCountdown--
+      }
       c.render()
     }
   }

@@ -1,8 +1,11 @@
 package view
 
 import (
+  "cmp"
   "context"
   "fmt"
+  "maps"
+  "slices"
   "sync"
   "time"
 
@@ -24,6 +27,7 @@ type operation struct {
 type operationList struct {
   list *client.List
   Filter string
+  Name string
   a *client.App
   ops []string
   opcache *lru.Cache[string, operation]
@@ -33,10 +37,11 @@ type operationList struct {
   reversed bool
   queues []*client.Queue
   fetchToken string
+  grouped bool
 }
 
 func NewOperationList(a *client.App, mode int, v View) *operationList {
-  opcache, _ := lru.New[string, operation](1024)
+  opcache, _ := lru.New[string, operation](10000)
   var queues []*client.Queue
   if mode != 3 {
     c := bfpb.NewOperationQueueClient(a.Conn)
@@ -61,6 +66,7 @@ func NewOperationList(a *client.App, mode int, v View) *operationList {
     }
   }
   return &operationList {
+    Name: "executions",
     list: client.NewList(),
     a: a,
     mode: mode,
@@ -84,16 +90,17 @@ func (v operationList) fetchQueues(max int64, cb func(string) (*client.Operation
   return ops
 }
 
-func (v operationList) fetchFiltered(filter string) []*client.Operation {
+func (v operationList) fetchFiltered(filter string, name string) []*client.Operation {
   var ops []*client.Operation
   c := longrunning.NewOperationsClient(v.a.Conn)
   for nextPageToken := "initial"; nextPageToken != ""; v.fetchToken = nextPageToken {
-    r, err := c.ListOperations(context.Background(), &longrunning.ListOperationsRequest {
-      Name: fmt.Sprintf("%s/executions", v.a.Instance),
+    req := &longrunning.ListOperationsRequest {
+      Name: fmt.Sprintf("%s/%s", v.a.Instance, name),
       Filter: filter,
       PageSize: 100,
       PageToken: v.fetchToken,
-    })
+    }
+    r, err := c.ListOperations(context.Background(), req)
     if err != nil {
       panic(err)
     }
@@ -122,8 +129,8 @@ func (v operationList) fetch() []*client.Operation {
   switch v.mode {
   case 1: return v.fetchQueues(20, client.ParsePrequeueName)
   case 2: return v.fetchQueues(20, client.ParseQueueName)
-  case 3: return v.fetchFiltered("status=dispatched")
-  case 4: return v.fetchFiltered(v.Filter)
+  case 3: return v.fetchFiltered("status=dispatched", v.Name)
+  case 4: return v.fetchFiltered(v.Filter, v.Name)
   default:
     return make([]*client.Operation, 0)
   }
@@ -131,9 +138,13 @@ func (v operationList) fetch() []*client.Operation {
 
 func (v *operationList) createOperationView() View {
   if len(v.ops) > 0 {
-    return NewOperation(v.a, v.list.Rows[v.list.SelectedRow].(*stageEx).name, v)
+    return NewDocument(v.a, v.list.Rows[v.list.SelectedRow].(*stageEx).name, v)
   }
   return v
+}
+
+func (v *operationList) selectedName() string {
+  return v.list.Rows[v.list.SelectedRow].(*stageEx).name
 }
 
 func (v *operationList) Handle(e ui.Event) View {
@@ -141,6 +152,9 @@ func (v *operationList) Handle(e ui.Event) View {
   case "<Escape>", "q", "<C-c>":
     ui.Clear()
     return v.v
+  case "G":
+    // group the operations in the list by the current visible field and count them
+    v.grouped = !v.grouped
   case "j", "<Down>":
     v.list.ScrollDown()
   case "k", "<Up>":
@@ -153,7 +167,15 @@ func (v *operationList) Handle(e ui.Event) View {
     v.field %= 4
   case "<Enter>":
     ui.Clear()
-    return v.createOperationView()
+    if v.Name == "executions" {
+      return v.createOperationView()
+    }
+    if v.Name == "toolInvocations" {
+      olv := NewOperationList(v.a, 4, v)
+      olv.Filter = "toolInvocationId=" + v.selectedName()
+      return olv
+    }
+    return v
   case ">", "<":
     v.reversed = !v.reversed
   }
@@ -222,34 +244,108 @@ func (v operationList) modeTitle() string {
   }
 }
 
-func (v operationList) Render() []ui.Drawable {
-  fields := [...]string{"name", "target", "build", "mnemonic"}
-  v.list.Title = fmt.Sprintf("%s Operations (%s) %d", v.modeTitle(), fields[v.field], len(v.ops))
+func opStringer(name string, op *operation, field func () int) *stageEx {
+  row := &stageEx{
+    field: field,
+    name: name,
+  }
+  if op != nil {
+    row.fence, row.target, row.mnemonic, row.build = op.workerStart, op.target, op.mnemonic, op.build
+  } else {
+    row.target, row.mnemonic, row.build = "unknown", "unknown", "unknown"
+  }
+  return row
+}
+
+func (v operationList) renderItemized() []fmt.Stringer {
   rows := make([]fmt.Stringer, len(v.ops))
   for i := 0; i < len(v.ops); i++ {
     name := v.ops[i]
     op, ok := v.opcache.Get(name)
+    o := &op
     if !ok {
-      panic("opcache didn't contain: " + name)
+      o = nil
     }
-    rows[i] = &stageEx{
-      field: func () int { return v.field },
-      name: name,
-      fence: op.workerStart,
-      target: op.target,
-      mnemonic: op.mnemonic,
-      build: op.build,
+    rows[i] = opStringer(name, o, func () int { return v.field })
+  }
+  return rows
+}
+
+type groupResult struct {
+  name string
+  count int
+}
+
+func (r groupResult) String() string {
+  return fmt.Sprintf("%s: %d", r.name, r.count)
+}
+
+func (v operationList) renderGrouped() []fmt.Stringer {
+  buckets := make(map[string]*groupResult)
+  for _, name := range v.ops {
+    op, ok := v.opcache.Get(name)
+    o := &op
+    if !ok {
+      o = nil
     }
+    val := opStringer(name, o, func () int { return v.field }).label()
+    r, ok := buckets[val]
+    if !ok {
+      r = &groupResult {
+        name: val,
+        count: 0,
+      }
+      buckets[val] = r
+    }
+    r.count++
+  }
+
+  results := slices.SortedStableFunc(maps.Values(buckets), func (a, b *groupResult) int {
+    c := cmp.Compare(b.count, a.count)
+    if v.reversed {
+      c = -c
+    }
+    return c
+  })
+  rows := make([]fmt.Stringer, len(results))
+  for i, r := range results {
+    rows[i] = r
+  }
+  return rows
+}
+
+func fieldName(grouped bool, field int) string {
+  fields := [...]string{"name", "target", "mnemonic", "build"}
+  name := ""
+  if grouped {
+    name = "Grouped by "
+  }
+  name += fields[field]
+  return name
+}
+
+func (v operationList) renderTitle() string {
+  return fmt.Sprintf("%s Operations (%s) %d", v.modeTitle(), fieldName(v.grouped, v.field), len(v.ops))
+}
+
+func (v operationList) Render() []ui.Drawable {
+  v.list.Title = v.renderTitle()
+
+  var rows []fmt.Stringer
+  if v.grouped {
+    rows = v.renderGrouped()
+  } else {
+    rows = v.renderItemized()
+    fence := func(e1, e2 fmt.Stringer) bool {
+      stageEx1, stageEx2 := e1.(*stageEx), e2.(*stageEx)
+      return (stageEx1.fence.Compare(stageEx2.fence) < 0) != v.reversed
+    }
+    byExec(fence).Sort(rows)
   }
   v.list.Rows = rows
-  fence := func(e1, e2 fmt.Stringer) bool {
-    stageEx1, stageEx2 := e1.(*stageEx), e2.(*stageEx)
-    return (stageEx1.fence.Compare(stageEx2.fence) < 0) != v.reversed
-  }
-  byExec(fence).Sort(v.list.Rows)
   v.list.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
   v.list.WrapText = false
-  v.list.SetRect(0, 0, 80, 30)
+  v.list.SetRect(0, 0, 160, 30)
 
   return []ui.Drawable { v.list }
 }

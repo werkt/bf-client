@@ -77,7 +77,7 @@ func NewSearch(a *client.App, v View) View {
   resource := newDropdown(makeStringers([]string{"executions", "toolInvocations", "correlatedInvocations"}))
   resource.SetRect(20, 15, 40, 18)
   resource.Border = false
-  filter := newDropdown(makeStringers([]string{"toolInvocationId", "correlatedInvocationsId", "username", "hostname"}))
+  filter := newDropdown(makeStringers([]string{"toolInvocationId", "correlatedInvocationsId", "username", "hostname", "name"}))
   filter.SetRect(resource.Max.X + 1, resource.Min.Y, resource.Max.X + 21, resource.Max.Y)
   filter.Border = false
   text := widgets.NewParagraph()
@@ -116,6 +116,8 @@ func (s *search) handleText(p *widgets.Paragraph, e ui.Event) {
     if len(p.Text) > 1 {
       p.Text = p.Text[:len(p.Text)-2] + "_"
     }
+  } else if e.ID == "<C-u>" {
+    p.Text = "_"
   } else {
     p.Text = p.Text[:len(p.Text)-1] + e.ID + "_"
   }
@@ -149,6 +151,9 @@ func (s *search) Handle(e ui.Event) View {
   case "<Enter>":
     if s.i == 0 && len(s.text.Text) != 1 {
       text := s.text.Text[:len(s.text.Text)-1]
+      if s.filter.value() == "name" && s.resource.value() == "executions" {
+        return NewDocument(s.a, text, s.v)
+      }
       return NewSearchResults(s.resource.value(), s.filter.value(), text, s.a, s.v)
     }
   case "q":

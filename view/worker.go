@@ -60,6 +60,7 @@ func NewWorker(a *client.App, w string, v View) *worker {
     execute: execute,
     reportResult: reportResult,
     fetches: make(map[string]time.Time),
+    profile: &bfpb.WorkerProfileMessage { },
   }
 }
 
@@ -108,7 +109,7 @@ func (v *worker) Handle(e ui.Event) View {
   case "X":
     v.cancelOperation()
   case "<Enter>":
-    return NewOperation(v.a, v.currentOperationName(), v)
+    return NewDocument(v.a, v.currentOperationName(), v)
   case "j", "<Down>":
     v.selectedList().ScrollDown()
   case "k", "<Up>":
@@ -143,6 +144,7 @@ type stageEx struct {
   field func () int
   name string
   stalled bool
+  errored bool
   fence time.Time
   target string
   mnemonic string
@@ -166,6 +168,9 @@ func reasonableDuration(d time.Duration) time.Duration {
 }
 
 func (e stageEx) String() string {
+  if e.errored {
+    return fmt.Sprintf("[%s](fg:black,bg:red)", e.label())
+  }
   label := fmt.Sprintf("%s %s", e.label(), reasonableDuration(time.Now().Sub(e.fence)).String())
   if e.stalled {
     label = fmt.Sprintf("[%s](fg:black,bg:blue)", label)
@@ -228,9 +233,11 @@ func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
     if ok {
       stalled, fence, err := stageFenced(op, stage)
       if err != nil {
-        panic(err)
+        // non-result complete operation
+        ex.errored = true
+      } else {
+        ex.stalled, ex.fence = stalled, fence
       }
-      ex.stalled, ex.fence = stalled, fence
       m := client.RequestMetadata(op)
       ex.target = m.TargetId
       ex.mnemonic = m.ActionMnemonic
@@ -240,6 +247,9 @@ func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
   }
   fence := func(e1, e2 fmt.Stringer) bool {
     stageEx1, stageEx2 := e1.(*stageEx), e2.(*stageEx)
+    if stageEx1.errored != stageEx2.errored {
+      return stageEx2.errored != v.reversed
+    }
     if stageEx1.stalled != stageEx2.stalled {
       return stageEx2.stalled != v.reversed
     }
@@ -338,7 +348,7 @@ func (v worker) Render() []ui.Drawable {
       if name == "" {
         continue
       }
-      if op, ok := v.a.Ops[name]; ok {
+      if op, ok := v.a.Ops[name]; ok && op != nil {
         match, err := opMatchesStage(op, stage)
         if err != nil {
           panic(err)
@@ -381,7 +391,12 @@ func (v worker) Render() []ui.Drawable {
       v.inputFetch.Title = fmt.Sprintf(selectedTitle(v.inputFetch.SelectedRow != -1, "InputFetch") + " %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
       v.populateExecutions(v.inputFetch, stage.Name, stage.OperationNames)
     case "ExecuteActionStage":
-      v.execute.Title = fmt.Sprintf(selectedTitle(v.execute.SelectedRow != -1, "Execute") + " %d/%d", stage.SlotsUsed, stage.SlotsConfigured)
+      executions := len(stage.OperationNames)
+      avg_slots_per_execution := float32(0)
+      if executions > 0 {
+        avg_slots_per_execution = float32(stage.SlotsUsed) / float32(executions)
+      }
+      v.execute.Title = fmt.Sprintf(selectedTitle(v.execute.SelectedRow != -1, "Execute") + " %d/%d (%d) Avg %g", stage.SlotsUsed, stage.SlotsConfigured, executions, avg_slots_per_execution)
       // TODO get some time spent doing this
       v.populateExecutions(v.execute, stage.Name, stage.OperationNames)
     case "ReportResultStage":
@@ -393,16 +408,16 @@ func (v worker) Render() []ui.Drawable {
   row := 1
   v.match.SetRect(0, row, 80, row + 3)
   row += 3
-  inputFetchRows := len(v.inputFetch.Rows)
-  inputFetchHeight := Min(inputFetchRows, 5)
+  // inputFetchRows := len(v.inputFetch.Rows)
+  inputFetchHeight := 5
   v.inputFetch.SetRect(0, row, 80, row + 2 + inputFetchHeight)
   row += 2 + inputFetchHeight
-  executeRows := len(v.execute.Rows)
-  executeHeight := Min(executeRows, 5)
+  // executeRows := len(v.execute.Rows)
+  executeHeight := 5
   v.execute.SetRect(0, row, 80, row + 2 + executeHeight)
   row += 2 + executeHeight
-  reportResultRows := len(v.reportResult.Rows)
-  reportResultHeight := Min(reportResultRows, 5)
+  // reportResultRows := len(v.reportResult.Rows)
+  reportResultHeight := 5
   v.reportResult.SetRect(0, row, 80, row + 2 + reportResultHeight)
 
   return []ui.Drawable { v.title, v.match, v.inputFetch, v.execute, v.reportResult }

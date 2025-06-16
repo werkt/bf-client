@@ -7,6 +7,7 @@ go_library(
         "bytestream.go",
         "cas.go",
         "digest.go",
+        "document.go",
         "hasher.go",
         "hashtag.go",
         "list.go",
@@ -19,6 +20,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//third_party/buildfarm:go_default_library",
+        "@com_github_ericchiang_css//:go_default_library",
         "@com_github_gizak_termui_v3//:go_default_library",
         "@com_github_golang_protobuf//jsonpb:go_default_library",
         "@com_github_golang_protobuf//proto:go_default_library",
@@ -31,6 +33,7 @@ go_library(
         "@org_golang_google_grpc//:go_default_library",
         "@org_golang_google_grpc//credentials:go_default_library",
         "@org_golang_google_grpc//credentials/insecure:go_default_library",
+        "@org_golang_x_net//html:go_default_library",
         "@remoteapis//build/bazel/remote/execution/v2:go_default_library",
     ],
 )

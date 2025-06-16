@@ -1,6 +1,6 @@
 {
   "lockFileVersion": 3,
-  "moduleFileHash": "b21554fe630b1fdc4abac7d4a75d48e0d5e15fccb2c769b40e2f97d033b86e8b",
+  "moduleFileHash": "ca9b1b9d5bc87c36bb212ad3b76d5981d95af1805f3495ac00cc3eda39efead1",
   "flags": {
     "cmdRegistries": [
       "https://bcr.bazel.build/"
@@ -63,6 +63,7 @@
           },
           "imports": {
             "com_github_dustin_go_humanize": "com_github_dustin_go_humanize",
+            "com_github_ericchiang_css": "com_github_ericchiang_css",
             "com_github_gammazero_deque": "com_github_gammazero_deque",
             "com_github_gizak_termui_v3": "com_github_gizak_termui_v3",
             "com_github_golang_protobuf": "com_github_golang_protobuf",
@@ -76,7 +77,8 @@
             "org_golang_google_genproto_googleapis_api": "org_golang_google_genproto_googleapis_api",
             "org_golang_google_genproto_googleapis_bytestream": "org_golang_google_genproto_googleapis_bytestream",
             "org_golang_google_genproto_googleapis_rpc": "org_golang_google_genproto_googleapis_rpc",
-            "org_golang_google_grpc": "org_golang_google_grpc"
+            "org_golang_google_grpc": "org_golang_google_grpc",
+            "org_golang_x_net": "org_golang_x_net"
           },
           "devImports": [],
           "tags": [
@@ -102,7 +104,7 @@
           "usingModule": "<root>",
           "location": {
             "file": "@@//:MODULE.bazel",
-            "line": 47,
+            "line": 49,
             "column": 27
           },
           "imports": {
@@ -4594,7 +4596,7 @@
   "moduleExtensions": {
     "//:extensions.bzl%build_deps": {
       "general": {
-        "bzlTransitiveDigest": "BdZL24PofrV6rlY460UFbuXfUjaGvWQYrggfcVY8KcA=",
+        "bzlTransitiveDigest": "mJxPAXfUFdoDbteL919XPyaE51UGN0nLfDEOiN7hObE=",
         "accumulatedFileDigests": {},
         "envVariables": {},
         "generatedRepoSpecs": {
@@ -4604,10 +4606,10 @@
             "attributes": {
               "name": "_main~build_deps~buildfarm",
               "build_file": "@@//:BUILD.buildfarm",
-              "sha256": "64759237ce8f8e827f76df114db84d1bdb23ebcca623da7d2ad04eeb2eb264c6",
-              "strip_prefix": "buildfarm-ea377e435be6c1575282a6c5586c021c41909783/src/main/protobuf/build/buildfarm/v1test/",
+              "sha256": "bcbe87b95c3b6fd842a479081bf6d176663851e14224d7f9422c2a4265c5e40d",
+              "strip_prefix": "buildfarm-0b27cd1143e1386dd1bb7f0261e88867901de336/src/main/protobuf/build/buildfarm/v1test/",
               "urls": [
-                "https://github.com/buildfarm/buildfarm/archive/ea377e435be6c1575282a6c5586c021c41909783.zip"
+                "https://github.com/buildfarm/buildfarm/archive/0b27cd1143e1386dd1bb7f0261e88867901de336.zip"
               ]
             }
           }
@@ -5150,10 +5152,10 @@
       "general": {
         "bzlTransitiveDigest": "lGoYsPom4pICCPJGUmAsGOZPMGMIaTWo4of0qxabjxU=",
         "accumulatedFileDigests": {
-          "@@//:go.mod": "2ef7d4f32f0d9473832c1632a37117e3fccc894bdb17d294fd8ac6d938ad552d",
+          "@@//:go.mod": "540f61d0b01f6e9d00202d6016825b5163bdccc036be1bfb5af87bdaab0289f0",
           "@@bazel_remote_apis~override//:go.mod": "65e429acee6f8b28d248d9f6540b006b7e0b73458f035b6d7eaa7e6de129a097",
           "@@gazelle~0.41.0//:go.sum": "49ccbfab32bd329a5d9cfc67afdae01d99f2de4f44ebe26a830369569970eae4",
-          "@@//:go.sum": "8cb42ef1320532b9a8bc924d6046f8f565f7470a7a337b98296b0f1c1eb2c5ed",
+          "@@//:go.sum": "dc5d45f1477fd730ba8671f3a802bc6676e06cf1a475b57d315fb144eaa5b322",
           "@@rules_go~0.52.0//:go.mod": "cd78ea04f1801ac0007f32baf38b818762618dda5b7f397473e398ff82cc1776",
           "@@bazel_remote_apis~override//:go.sum": "9355f9bad0b415bc7858784a16513f30ddf667c856e77a533931f071d4c44561",
           "@@rules_go~0.52.0//:go.sum": "224d2c483b55183fa531d917e8db224838d56642aff1db40e0a523779194e752",
@@ -5769,6 +5771,7 @@
               "importpaths": {
                 "@bazel_remote_apis~override": "github.com/bazelbuild/remote-apis",
                 "com_github_dustin_go_humanize": "github.com/dustin/go-humanize",
+                "com_github_ericchiang_css": "github.com/ericchiang/css",
                 "com_github_gammazero_deque": "github.com/gammazero/deque",
                 "com_github_gizak_termui_v3": "github.com/gizak/termui/v3",
                 "com_github_golang_protobuf": "github.com/golang/protobuf",
@@ -5836,6 +5839,24 @@
               "sum": "h1:sJ3XhFINmHSrYCgl958hscfIa3bw8x4DqMP3u1YvoYE="
             }
           },
+          "com_github_ericchiang_css": {
+            "bzlFile": "@@gazelle~0.41.0//internal:go_repository.bzl",
+            "ruleClassName": "go_repository",
+            "attributes": {
+              "name": "gazelle~0.41.0~go_deps~com_github_ericchiang_css",
+              "internal_only_do_not_use_apparent_name": "com_github_ericchiang_css",
+              "importpath": "github.com/ericchiang/css",
+              "build_directives": [],
+              "build_file_generation": "auto",
+              "build_extra_args": [],
+              "patches": [],
+              "patch_args": [],
+              "debug_mode": false,
+              "replace": "",
+              "version": "v1.4.0",
+              "sum": "h1:OlkWiPGHZpWIthKa2YBSAh00XwOT1PUtaoye9bKkTqw="
+            }
+          },
           "org_golang_x_sys": {
             "bzlFile": "@@gazelle~0.41.0//internal:go_repository.bzl",
             "ruleClassName": "go_repository",
@@ -5858,6 +5879,7 @@
         "moduleExtensionMetadata": {
           "explicitRootModuleDirectDeps": [
             "com_github_dustin_go_humanize",
+            "com_github_ericchiang_css",
             "com_github_gammazero_deque",
             "com_github_gizak_termui_v3",
             "com_github_golang_protobuf",

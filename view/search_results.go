@@ -196,6 +196,9 @@ func (by by_exec) Sort(executions []*opRow) {
 func (s *searchResults) fetchExecutionDetail() {
   exec := func(o1, o2 opRow) bool {
     ex1, ex2 := o1.o.(*ex), o2.o.(*ex)
+    if ex1.o.Done == ex2.o.Done {
+      return ex1.m.TargetId > ex2.m.TargetId
+    }
     return ex1.o.Done && !ex2.o.Done
   }
   by_exec(exec).Sort(s.opRows)

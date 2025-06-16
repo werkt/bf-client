@@ -25,6 +25,9 @@ func Expect(c *grpc.ClientConn, d bfpb.Digest, m proto.Message) error {
     if err == io.EOF {
       break
     }
+    if err != nil {
+      return err
+    }
     if int64(len(br.Data)) == d.Size {
       b = br.Data
     }

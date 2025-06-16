@@ -31,6 +31,10 @@ type App struct {
   Invocations map[string][]string
   Fetches uint
   Mutex *sync.Mutex
+
+  FrameLimit int
+  SkipFrames int
+  UpdateCountdown int
 }
 
 func NewApp(redisHost string, reapiHost string, ca string) *App {
@@ -46,6 +50,7 @@ func NewApp(redisHost string, reapiHost string, ca string) *App {
     workerConns: make(map[string]*grpc.ClientConn),
     Client: &UnifiedRedis{},
     Mutex: &sync.Mutex{},
+    FrameLimit: 60,
   }
 }
 

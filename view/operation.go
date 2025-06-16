@@ -25,6 +25,8 @@ type operationView struct {
   selection int // enum of correlated, invocation, action
   selectableFields int
   selectionActions []func(*operationView) View
+  paused bool
+  p *widgets.Paragraph
 }
 
 func NewOperation(a *client.App, name string, v View) *operationView {
@@ -35,6 +37,7 @@ func NewOperation(a *client.App, name string, v View) *operationView {
     v: v,
     selection: 0,
     selectableFields: 0,
+    p: widgets.NewParagraph(),
   }
 }
 
@@ -57,6 +60,8 @@ func (v *operationView) Handle(e ui.Event) View {
     } else {
       v.selection = 0
     }
+  case "p", "<Space>":
+    v.paused = !v.paused
   case "<Enter>":
     if v.selectableFields > 0 {
       return v.selectionActions[v.selection](v)
@@ -74,47 +79,51 @@ func (v *operationView) fetch() (*longrunning.Operation, error) {
 }
 
 func (v *operationView) Update() {
-  if v.err != nil || !v.op.Done {
+  if !v.paused && (v.err != nil || !v.op.Done) {
     v.a.Fetches++
     v.op, v.err = v.fetch()
   }
 }
 
 func (v *operationView) Render() []ui.Drawable {
-  op := widgets.NewParagraph()
-  op.Title = v.name
-  op.WrapText = true
-  if v.err != nil {
-    op.Text = string(v.err.Error())
-    v.selectableFields = 0
-  } else {
-    v.renderOperation(op)
+  p := v.p
+  p.Title = v.name
+  if v.paused {
+    p.Title += " (Paused)"
   }
-  op.SetRect(0, 0, 120, 60)
+  p.WrapText = true
+  if v.err != nil {
+    p.Text = string(v.err.Error())
+    v.selectableFields = 0
+  } else if !v.paused {
+    p.Text = v.renderOperation()
+  }
+  p.SetRect(0, 0, 120, 60)
 
-  return []ui.Drawable { op }
+  return []ui.Drawable { p }
 }
 
-func (v *operationView) renderOperation(op *widgets.Paragraph) {
+func (v *operationView) renderOperation() string {
   m := v.op.Metadata
   em := &reapi.ExecuteOperationMetadata{}
   qm := &bfpb.QueuedOperationMetadata{}
   df := reapi.DigestFunction_UNKNOWN
+  var text string
   if ptypes.Is(m, em) {
     if err := ptypes.UnmarshalAny(m, em); err != nil {
-      op.Text = err.Error()
+      text = err.Error()
       v.selectableFields = 0
     } else {
       df = em.DigestFunction
       m, ok := v.a.Metadatas[v.name]
-      op.Text = ""
+      text = ""
       if ok {
-        op.Text += renderRequestMetadata(m, v.selection)
+        text += renderRequestMetadata(m, v.selection)
         v.selectableFields = 3
       } else {
         v.selectableFields = 1
       }
-      op.Text += renderExecuteOperationMetadata(em, v.selection)
+      text += renderExecuteOperationMetadata(em, v.selection)
       v.selectionActions = make([]func(*operationView) View, v.selectableFields)
       actionIndex := 0
       if ok {
@@ -126,13 +135,13 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
     }
   } else if ptypes.Is(m, qm) {
     if err := ptypes.UnmarshalAny(m, qm); err != nil {
-      op.Text = err.Error()
+      text = err.Error()
       v.selectableFields = 0
     } else {
       df = qm.ExecuteOperationMetadata.DigestFunction
-      op.Text = renderRequestMetadata(qm.RequestMetadata, v.selection)
-      op.Text += renderExecuteOperationMetadata(qm.ExecuteOperationMetadata, v.selection)
-      op.Text += fmt.Sprintf("queued operation: %s\n", renderDigest(*qm.QueuedOperationDigest, v.selection == 3))
+      text = renderRequestMetadata(qm.RequestMetadata, v.selection)
+      text += renderExecuteOperationMetadata(qm.ExecuteOperationMetadata, v.selection)
+      text += fmt.Sprintf("queued operation: %s\n", xrenderDigest(*qm.QueuedOperationDigest, v.selection == 3))
       v.selectableFields = 4
       v.selectionActions = make([]func(*operationView) View, v.selectableFields)
       v.selectionActions[0] = createInvocationView
@@ -143,22 +152,22 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
       }
     }
   } else {
-    op.Text = proto.MarshalTextString(v.op)
+    text = proto.MarshalTextString(v.op)
     v.selectableFields = 0
   }
 
   switch r := v.op.Result.(type) {
   case *longrunning.Operation_Error:
-    op.Text += "error: " + proto.MarshalTextString(r.Error)
+    text += "error: " + proto.MarshalTextString(r.Error)
   case *longrunning.Operation_Response:
     er := &reapi.ExecuteResponse{}
     if ptypes.Is(r.Response, er) {
       if err := ptypes.UnmarshalAny(r.Response, er); err != nil {
-        op.Text += err.Error()
+        text += err.Error()
         v.selectableFields = 0
       } else {
         ex := renderExecuteResponse(er, df, v.selection)
-        op.Text += ex.text
+        text += ex.text
         selectableFields := v.selectableFields
         v.selectableFields += ex.fields
         selectionActions := v.selectionActions
@@ -173,6 +182,7 @@ func (v *operationView) renderOperation(op *widgets.Paragraph) {
       }
     }
   }
+  return text
 }
 
 type executeText struct {
@@ -397,12 +407,12 @@ func boldIfSelected(s string, selected bool) string {
 }
 
 // deserves its own file probably
-func renderDigest(d bfpb.Digest, selected bool) string {
+func xrenderDigest(d bfpb.Digest, selected bool) string {
   return boldIfSelected(client.DigestString(d), selected)
 }
 
 func renderREDigest(d reapi.Digest, df reapi.DigestFunction_Value, selected bool) string {
-  return renderDigest(bfpb.Digest {
+  return xrenderDigest(bfpb.Digest {
     Hash: d.Hash,
     Size: d.SizeBytes,
     DigestFunction: df,

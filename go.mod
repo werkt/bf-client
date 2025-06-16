@@ -5,6 +5,7 @@ go 1.23
 require (
 	github.com/bazelbuild/remote-apis v0.0.0-20231221155620-d20ae8b97fd3
 	github.com/dustin/go-humanize v1.0.1
+	github.com/ericchiang/css v1.4.0
 	github.com/gammazero/deque v0.2.1
 	github.com/gizak/termui/v3 v3.1.0
 	github.com/golang/protobuf v1.5.4

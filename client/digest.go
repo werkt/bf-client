@@ -4,6 +4,8 @@ import (
   "encoding/hex"
   "fmt"
   "github.com/golang/protobuf/proto"
+  "strconv"
+  "strings"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
 )
@@ -23,6 +25,43 @@ func DigestString(d bfpb.Digest) string {
     prefix = "blake3/"
   }
   return fmt.Sprintf("%s%s/%d", prefix, d.Hash, d.Size)
+}
+
+func parseDigestFunction(s string) reapi.DigestFunction_Value {
+  switch s {
+  case "blake3":
+    return reapi.DigestFunction_BLAKE3
+  }
+  return reapi.DigestFunction_UNKNOWN
+}
+
+func inferDigestFunction(h string) reapi.DigestFunction_Value {
+  switch len(h) / 2 * 8{
+  case 128: return reapi.DigestFunction_MD5
+  case 160: return reapi.DigestFunction_SHA1
+  case 256: return reapi.DigestFunction_SHA256
+  case 384: return reapi.DigestFunction_SHA384
+  case 512: return reapi.DigestFunction_SHA512
+  }
+  return reapi.DigestFunction_UNKNOWN
+}
+
+func ParseDigest(s string) bfpb.Digest {
+  c := strings.Split(s, "/")
+  var df reapi.DigestFunction_Value
+  if len(c) == 3 {
+    df = parseDigestFunction(c[0])
+    c = c[1:]
+  } else {
+    df = inferDigestFunction(c[0])
+  }
+  hash := c[0]
+  size, _ := strconv.ParseInt(c[1], 10, 64)
+  return bfpb.Digest {
+    DigestFunction: df,
+    Hash: hash,
+    Size: size,
+  }
 }
 
 func HasherFromDigestFunction(df reapi.DigestFunction_Value) Hasher {
