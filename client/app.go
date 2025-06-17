@@ -89,6 +89,9 @@ func connect(host string, ca string) *grpc.ClientConn {
 }
 
 func loadTLSCredentials(ca string) (credentials.TransportCredentials, error) {
+  if ca == "" {
+    return credentials.NewTLS(&tls.Config{}), nil
+  }
   // Load certificate of the CA who signed server's certificate
   pemServerCA, err := os.ReadFile(ca)
   if err != nil {
