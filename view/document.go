@@ -9,7 +9,6 @@ import (
   bfpb "github.com/buildfarm/buildfarm/build/buildfarm/v1test"
   reapi "github.com/bazelbuild/remote-apis/build/bazel/remote/execution/v2"
   ui "github.com/gizak/termui/v3"
-  "github.com/gizak/termui/v3/widgets"
   "github.com/golang/protobuf/proto"
   "github.com/golang/protobuf/ptypes"
   "github.com/werkt/bf-client/client"
@@ -23,7 +22,7 @@ type document struct {
   a *client.App
   v View
   d *client.Document
-  p *widgets.Paragraph
+  p *client.Paragraph
   anchors []*html.Node
   focusAnchor int
   source bool
@@ -76,7 +75,7 @@ func NewDocument(a *client.App, name string, v View) *document {
     d: d,
     name: name,
     op: &longrunning.Operation{},
-    p: widgets.NewParagraph(),
+    p: client.NewParagraph(),
     anchors: anchors,
     focusAnchor: focusAnchor,
     rm: rm,
@@ -88,11 +87,11 @@ func NewDocument(a *client.App, name string, v View) *document {
 
 func (d document) Render() []ui.Drawable {
   ui.Clear()
-  d.p.Title = d.d.Title();
+  d.p.Title = d.d.Title()
   if d.source {
-    d.p.Text = d.d.RenderSource();
+    d.p.Text = d.d.RenderSource()
   } else {
-    d.p.Text = d.d.Render();
+    d.p.Text = d.d.Render()
   }
   d.p.SetRect(0, 0, 120, 60)
   return []ui.Drawable { d.p }
@@ -451,7 +450,9 @@ func (d *document) Update() {
       if err := ptypes.UnmarshalAny(m, qm); err != nil {
         panic(err)
       }
-      replaceNodeContent(fmt.Sprintf(`Queued Operation: <a href="queuedOperation:%[1]s">%[1]s</a>`, client.DigestString(*qm.QueuedOperationDigest)), d.qo)
+      if qm.QueuedOperationDigest != nil {
+        replaceNodeContent(fmt.Sprintf(`Queued Operation: <a href="queuedOperation:%[1]s">%[1]s</a>`, client.DigestString(*qm.QueuedOperationDigest)), d.qo)
+      }
     }
 
     df := em.DigestFunction
@@ -564,6 +565,9 @@ func (d *document) Handle(e ui.Event) View {
     return d
   case "u":
     d.source = !d.source
+    return d
+  case "U":
+    d.p.Raw = !d.p.Raw
     return d
   case "<Escape>", "q", "<C-c>":
     ui.Clear()

@@ -150,9 +150,7 @@ func (v *Queue) Handle(e ui.Event) View {
       v.stats.Collapse()
       ui.Clear()
     } else {
-      v.stats.Focused = true
-    }
-    if v.stats.SelectedRow == 0 {
+      v.stats.Focused = v.meter.SelectedRow != -1
       if v.meter.SelectedRow == -1 {
         v.meter.SelectedRow = 0
       } else {
@@ -520,7 +518,14 @@ func sortWorkers(profiles []*profileResult, sort int) []*profileResult {
     return exec_used(w1) < exec_used(w2)
   }
   name := func(w1, w2 *profileResult) bool {
-    return w1.name < w2.name
+    w1name, w2name := w1.name, w2.name
+    if len(w1.profile.Name) != 0 {
+      w1name = w1.profile.Name
+    }
+    if len(w2.profile.Name) != 0 {
+      w2name = w2.profile.Name
+    }
+    return w1name > w2name
   }
   if sort == 0 {
     byProfile(exec).Sort(profiles)
@@ -533,15 +538,14 @@ func sortWorkers(profiles []*profileResult, sort int) []*profileResult {
 
 // List needs work on draw, flip for only background, etc
 func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int, view int) ui.Drawable {
-  plen := len(s.workers)
-
   meter.SelectedRowStyle = ui.NewStyle(ui.ColorBlack, ui.ColorWhite)
-  meter.SetRect(x, 4, x + 161, h - 6)
+  height := Min(len(s.profiles), h - 6)
+  meter.SetRect(x, 4, x + 161, 4 + height + 2)
   meter.Title = "Workers";
 
   wl := 0
-  for _, worker := range s.workers {
-    twl := len(worker)
+  for _, profile := range s.profiles {
+    twl := len(profile.profile.Name)
     if twl > wl {
       wl = twl
     }
@@ -550,6 +554,7 @@ func renderWorkersInfo(s *stats, meter *client.List, x int, h int, sort int, vie
   profiles := sortWorkers(slices.Collect(maps.Values(s.profiles)), sort)
 
   n := 0
+  plen := len(profiles)
   rows := make([]fmt.Stringer, plen)
   for _, p := range profiles {
     rows[n] = renderWorkerRow(p, wl, view)
@@ -590,8 +595,15 @@ func renderWorkerRow(r *profileResult, wl int, view int) Worker {
       }
     }
   }
-  row := strings.Repeat(" ", wl - len(r.name))
-  row += r.name + ": ["
+  name := r.name
+  if len(profile.Name) > 0 {
+    name = profile.Name
+  }
+  row := ""
+  if wl > len(name) {
+    row += strings.Repeat(" ", wl - len(name))
+  }
+  row += name + ": ["
   fetchCountBar := countBar(input_fetch_used, input_fetch_slots)
   maxWidth := len(countBar(input_fetch_slots, input_fetch_slots))
   if input_fetch_used > maxWidth {

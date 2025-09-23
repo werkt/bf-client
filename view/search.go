@@ -151,8 +151,13 @@ func (s *search) Handle(e ui.Event) View {
   case "<Enter>":
     if s.i == 0 && len(s.text.Text) != 1 {
       text := s.text.Text[:len(s.text.Text)-1]
-      if s.filter.value() == "name" && s.resource.value() == "executions" {
-        return NewDocument(s.a, text, s.v)
+      if s.resource.value() == "executions" {
+        if s.filter.value() == "name" {
+          return NewDocument(s.a, s.a.Instance + "/executions/" + text, s.v)
+        }
+        olv := NewOperationList(s.a, 4, s.v)
+        olv.Filter = fmt.Sprintf("%s=%s", s.filter.value(), text)
+        return olv
       }
       return NewSearchResults(s.resource.value(), s.filter.value(), text, s.a, s.v)
     }

@@ -27,10 +27,15 @@ type worker struct {
   w string
   profile *bfpb.WorkerProfileMessage
   title *widgets.Paragraph
+  // TODO make into array with better types
   match *client.List
   inputFetch *client.List
   execute *client.List
   reportResult *client.List
+  matchPaused bool
+  inputFetchPaused bool
+  executePaused bool
+  reportResultPaused bool
   field int
   reversed bool
   fetches map[string]time.Time
@@ -101,6 +106,99 @@ func (v *worker) selectedList() *client.List {
   return nil
 }
 
+func (v *worker) stageProfile(name string) *bfpb.StageInformation {
+  for _, stage := range v.profile.Stages {
+    if stage.Name == name {
+      return stage
+    }
+  }
+  return nil
+}
+
+func (v *worker) currentWidth() int32 {
+  if v.inputFetch.SelectedRow != -1 {
+    return v.stageProfile("InputFetchStage").SlotsConfigured
+  }
+  if v.execute.SelectedRow != -1 {
+    return v.stageProfile("ExecuteActionStage").SlotsConfigured
+  }
+  if v.reportResult.SelectedRow != -1 {
+    return v.stageProfile("ReportResultStage").SlotsConfigured
+  }
+  return 1
+}
+
+func (v *worker) selectedStage() (string, bool) {
+  if v.reportResult.SelectedRow != -1 {
+    return "ReportResultStage", v.reportResultPaused
+  }
+  if v.execute.SelectedRow != -1 {
+    return "ExecuteActionStage", v.executePaused
+  }
+  if v.inputFetch.SelectedRow != -1 {
+    return "InputFetchStage", v.inputFetchPaused
+  }
+  // default here because it's more sane than the rest
+  return "MatchStage", v.matchPaused
+}
+
+func (v *worker) togglePause() {
+  conn := v.a.GetWorkerConn(v.w, v.a.CA)
+  c := bfpb.NewWorkerControlClient(conn)
+  stage, paused := v.selectedStage()
+  paused = !paused
+  r, err := c.PipelineChange(context.Background(), &bfpb.WorkerPipelineChangeRequest {
+    Changes: []*bfpb.PipelineChange {
+      &bfpb.PipelineChange {
+        Stage: stage,
+        Paused: paused,
+      },
+    },
+  })
+  if err != nil {
+    panic(err)
+  }
+  for _, change := range r.Changes {
+    if change.Stage == stage && change.Paused != paused {
+      panic("pipeline close not effective")
+    }
+  }
+}
+
+func (v *worker) increaseWidth() {
+  v.changeWidth(v.currentWidth() + 1)
+}
+
+func (v *worker) decreaseWidth() {
+  width := v.currentWidth()
+  if width > 1 {
+    v.changeWidth(v.currentWidth() - 1)
+  }
+}
+
+func (v *worker) changeWidth(width int32) {
+  conn := v.a.GetWorkerConn(v.w, v.a.CA)
+  c := bfpb.NewWorkerControlClient(conn)
+  stage, paused := v.selectedStage()
+  r, err := c.PipelineChange(context.Background(), &bfpb.WorkerPipelineChangeRequest {
+    Changes: []*bfpb.PipelineChange {
+      &bfpb.PipelineChange {
+        Stage: stage,
+        Paused: paused,
+        Width: width,
+      },
+    },
+  })
+  if err != nil {
+    panic(err)
+  }
+  for _, change := range r.Changes {
+    if change.Stage == stage && change.Paused != paused {
+      panic("pipeline width change not effective")
+    }
+  }
+}
+
 func (v *worker) Handle(e ui.Event) View {
   switch e.ID {
   case "<Escape>", "q", "<C-c>":
@@ -136,6 +234,12 @@ func (v *worker) Handle(e ui.Event) View {
     }
   case ">", "<":
     v.reversed = !v.reversed
+  case "P":
+    v.togglePause()
+  case "+":
+    v.increaseWidth()
+  case "-":
+    v.decreaseWidth()
   }
   return v
 }
@@ -146,9 +250,11 @@ type stageEx struct {
   stalled bool
   errored bool
   fence time.Time
+  final time.Time
   target string
   mnemonic string
   build string
+  done bool
 }
 
 func (e stageEx) label() string {
@@ -171,7 +277,15 @@ func (e stageEx) String() string {
   if e.errored {
     return fmt.Sprintf("[%s](fg:black,bg:red)", e.label())
   }
-  label := fmt.Sprintf("%s %s", e.label(), reasonableDuration(time.Now().Sub(e.fence)).String())
+  // needs a clock inject
+  label := e.label()
+  if !e.fence.IsZero() {
+    end := time.Now()
+    if e.done {
+      end = e.final
+    }
+    label += " " + reasonableDuration(end.Sub(e.fence)).String()
+  }
   if e.stalled {
     label = fmt.Sprintf("[%s](fg:black,bg:blue)", label)
   }
@@ -239,6 +353,9 @@ func (v *worker) populateExecutions(l *client.List, stage string, r []string) {
         ex.stalled, ex.fence = stalled, fence
       }
       m := client.RequestMetadata(op)
+      if m == nil {
+        panic(op)
+      }
       ex.target = m.TargetId
       ex.mnemonic = m.ActionMnemonic
       ex.build = m.CorrelatedInvocationsId
@@ -423,11 +540,40 @@ func (v worker) Render() []ui.Drawable {
   return []ui.Drawable { v.title, v.match, v.inputFetch, v.execute, v.reportResult }
 }
 
+func pausedStyle(p bool) ui.Style {
+  if p {
+    return ui.NewStyle(ui.ColorRed)
+  } else {
+    return ui.Theme.Block.Border
+  }
+}
+
 func (v *worker) Update() {
   conn := v.a.GetWorkerConn(v.w, v.a.CA)
   workerProfile := bfpb.NewWorkerProfileClient(conn)
   profile, err := workerProfile.GetWorkerProfile(context.Background(), &bfpb.WorkerProfileRequest {})
   if err == nil {
     v.profile = profile
+  }
+  c := bfpb.NewWorkerControlClient(conn)
+  r, err := c.PipelineChange(context.Background(), &bfpb.WorkerPipelineChangeRequest {})
+  if err != nil {
+    panic(err)
+  }
+  for _, change := range r.Changes {
+    switch change.Stage {
+    case "MatchStage":
+      v.matchPaused = change.Paused
+      v.match.BorderStyle = pausedStyle(change.Paused)
+    case "InputFetchStage":
+      v.inputFetchPaused = change.Paused
+      v.inputFetch.BorderStyle = pausedStyle(change.Paused)
+    case "ExecuteActionStage":
+      v.executePaused = change.Paused
+      v.execute.BorderStyle = pausedStyle(change.Paused)
+    case "ReportResultStage":
+      v.reportResultPaused = change.Paused
+      v.reportResult.BorderStyle = pausedStyle(change.Paused)
+    }
   }
 }

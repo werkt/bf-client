@@ -4,10 +4,10 @@ def _buildfarm_extension_impl(_ctx):
     http_archive(
         name = "buildfarm",
         build_file = "@//:BUILD.buildfarm",
-        sha256 = "bcbe87b95c3b6fd842a479081bf6d176663851e14224d7f9422c2a4265c5e40d",
-        strip_prefix = "buildfarm-0b27cd1143e1386dd1bb7f0261e88867901de336/src/main/protobuf/build/buildfarm/v1test/",
+        sha256 = "cf47ea9674bde436cfafdcfc772be0fb5998482185c0e339ee4170370f025cf8",
+        strip_prefix = "buildfarm-6be2f5e33ca9e3a0c7a2be253d52a53c3df4eddc/src/main/protobuf/build/buildfarm/v1test/",
         urls = [
-            "https://github.com/buildfarm/buildfarm/archive/0b27cd1143e1386dd1bb7f0261e88867901de336.zip",
+            "https://github.com/buildfarm/buildfarm/archive/6be2f5e33ca9e3a0c7a2be253d52a53c3df4eddc.zip",
         ],
     )
 

@@ -3,6 +3,7 @@ package client
 import (
   "fmt"
   "regexp"
+  "slices"
   "strconv"
   "strings"
 
@@ -96,20 +97,42 @@ func NewDocument() *Document {
   }
 }
 
-func (d *Document) FindAll(selector string) []*html.Node {
+func SelectAll(n *html.Node, selector string) []*html.Node {
   sel, err := css.Parse(selector)
   if err != nil {
     panic(err)
   }
-  return sel.Select(d.root)
+  return sel.Select(n)
 }
 
-func (d *Document) Find(selector string) *html.Node {
-  nodes := d.FindAll(selector)
+func Select(n *html.Node, selector string) *html.Node {
+  nodes := SelectAll(n, selector)
   if len(nodes) == 0 {
     return nil
   }
   return nodes[0]
+}
+
+func Show(n *html.Node) {
+  // not definitive, could be hidden by style
+  n.Attr = slices.DeleteFunc(n.Attr, func(a html.Attribute) bool {
+    return a.Key == "style" && a.Val == "display:none"
+  })
+}
+
+func Hide(n *html.Node) {
+  n.Attr = append(n.Attr, html.Attribute {
+    Key: "style",
+    Val: "display:none",
+  })
+}
+
+func (d *Document) FindAll(selector string) []*html.Node {
+  return SelectAll(d.root, selector)
+}
+
+func (d *Document) Find(selector string) *html.Node {
+  return Select(d.root, selector)
 }
 
 func (d *Document) RenderSource() string {
@@ -162,11 +185,29 @@ func (r *render) run() string {
   return r.node(r.d.root, make([]styleNode, 0), 0)
 }
 
+func parseStyle(s string) styleNode {
+  var style styleNode
+  // jjjjank
+  if s == "display:none" {
+    style.properties = map[string]string {
+      "display": "none",
+    }
+  } else {
+    style.properties = map[string]string { }
+  }
+  return style
+}
+
 func (r *render) findStyles(n *html.Node) []styleNode {
   styles := make([]styleNode, 0)
   pseudo := ""
   if hasPseudoClass(n, "focus-visible") {
     pseudo = "focus-visible"
+  }
+  for _, attr := range n.Attr {
+    if attr.Key == "style" {
+      styles = append(styles, parseStyle(attr.Val))
+    }
   }
   for _, style := range r.d.styles {
     // juvenile

@@ -12,6 +12,7 @@ go_library(
         "hashtag.go",
         "list.go",
         "operation.go",
+        "paragraph.go",
         "queue.go",
         "tree.go",
         "unified_redis.go",

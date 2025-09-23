@@ -12,6 +12,7 @@ import (
 type Operation struct {
   Name string
   Metadata *reapi.RequestMetadata
+  Done bool
 }
 
 func ExecuteOperationMetadata(op *longrunning.Operation) (*reapi.ExecuteOperationMetadata, error) {
@@ -62,7 +63,7 @@ func ExecutedActionMetadata(o *longrunning.Operation) (*reapi.ExecutedActionMeta
         return er.Result.ExecutionMetadata, nil
       }
       if err == nil {
-        err = errors.New("ExecuteResponse.Result was nil for: " + proto.MarshalTextString(o))
+        err = errors.New("ExecuteResponse.Result was nil for: " + proto.MarshalTextString(o) + ": " + proto.MarshalTextString(er))
       }
       return nil, err
     }

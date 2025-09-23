@@ -196,7 +196,7 @@ func (by by_exec) Sort(executions []*opRow) {
 func (s *searchResults) fetchExecutionDetail() {
   exec := func(o1, o2 opRow) bool {
     ex1, ex2 := o1.o.(*ex), o2.o.(*ex)
-    if ex1.o.Done == ex2.o.Done {
+    if ex1.o.Done == ex2.o.Done && ex1.m != nil && ex2.m != nil {
       return ex1.m.TargetId > ex2.m.TargetId
     }
     return ex1.o.Done && !ex2.o.Done
@@ -310,7 +310,7 @@ func (s *searchResults) Handle(e ui.Event) View {
   case "<Enter>":
     // could be nicer and just send the op
     if s.resource == "executions" {
-      return NewOperation(s.a, s.selectedName, s)
+      return NewDocument(s.a, s.selectedName, s)
     } else if s.resource == "toolInvocations" {
       return NewSearchResults("executions", "toolInvocationId", s.selectedName, s.a, s)
     } else if s.resource == "correlatedInvocations" {
