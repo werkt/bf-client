@@ -1,0 +1,15 @@
+--- api_common.go
++++ api_common.go
+@@ -162,10 +162,10 @@
+ // them with caution and test your code on various terminals.
+ const (
+ 	AttrBold Attribute = 1 << (iota + 9)
+-	AttrBlink
++	AttrUnderline
+ 	AttrHidden
+ 	AttrDim
+-	AttrUnderline
++	AttrBlink
+ 	AttrCursive
+ 	AttrReverse
+ 	max_attr
