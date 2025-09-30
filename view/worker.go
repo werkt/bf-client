@@ -24,7 +24,7 @@ import (
 type worker struct {
   a *client.App
   v View
-  w string
+  workerName string
   profile *bfpb.WorkerProfileMessage
   title *widgets.Paragraph
   // TODO make into array with better types
@@ -48,7 +48,7 @@ func NewStageList() *client.List {
   return list
 }
 
-func NewWorker(a *client.App, w string, v View) *worker {
+func NewWorker(a *client.App, workerName string, v View) *worker {
   title := widgets.NewParagraph()
   match := NewStageList()
   inputFetch := NewStageList()
@@ -58,7 +58,7 @@ func NewWorker(a *client.App, w string, v View) *worker {
   return &worker {
     a: a,
     v: v,
-    w: w,
+    workerName: workerName,
     title: title,
     match: match,
     inputFetch: inputFetch,
@@ -441,7 +441,7 @@ func getExecution(a *client.App, name string, conn *grpc.ClientConn, wg *sync.Wa
 func (v worker) Render() []ui.Drawable {
   v.title.Text = fmt.Sprintf(
       "%s CAS Count: %d Size: %s (%d%%) Unref: %d%%",
-      v.w, v.profile.CasEntryCount, humanize.Bytes(uint64(v.profile.CasSize)),
+      v.workerName, v.profile.CasEntryCount, humanize.Bytes(uint64(v.profile.CasSize)),
       int((float64(v.profile.CasSize) / float64(v.profile.CasMaxSize)) * 100),
       int((float64(v.profile.CasUnreferencedEntryCount) / float64(v.profile.CasEntryCount)) * 100))
   v.title.Border = false
@@ -549,9 +549,7 @@ func pausedStyle(p bool) ui.Style {
 }
 
 func (v *worker) Update() {
-  conn := v.a.GetWorkerConn(v.w, v.a.CA)
-  workerProfile := bfpb.NewWorkerProfileClient(conn)
-  profile, err := workerProfile.GetWorkerProfile(context.Background(), &bfpb.WorkerProfileRequest {})
+  profile, err := bfpb.NewWorkerProfileClient(v.a.Conn).GetWorkerProfile(context.Background(), &bfpb.WorkerProfileRequest {WorkerName: v.workerName})
   if err == nil {
     v.profile = profile
   }
