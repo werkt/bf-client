@@ -242,7 +242,7 @@
   "moduleExtensions": {
     "//:extensions.bzl%build_deps": {
       "general": {
-        "bzlTransitiveDigest": "yzPfL9UwdpPYFRKWTv5Ol84AkkFQRm/y91nJeUagJz4=",
+        "bzlTransitiveDigest": "stX7A4VQJmSIAYO6FIXn7SC34Jexob+EiNSnZGJha9Y=",
         "usagesDigest": "N1be+WNYxoeG1JN4CaIE1KMt+fq1c0PjhQ9M3tOJvU0=",
         "recordedFileInputs": {},
         "recordedDirentsInputs": {},
@@ -257,13 +257,6 @@
               "urls": [
                 "https://github.com/buildfarm/buildfarm/archive/6be2f5e33ca9e3a0c7a2be253d52a53c3df4eddc.zip"
               ]
-            }
-          },
-          "local_buildfarm": {
-            "repoRuleId": "@@bazel_tools//tools/build_defs/repo:local.bzl%new_local_repository",
-            "attributes": {
-              "build_file": "@@//:BUILD.buildfarm",
-              "path": "../buildfarm/src/main/protobuf/build/buildfarm/v1test"
             }
           }
         },
