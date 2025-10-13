@@ -31,7 +31,7 @@ jobs:
             bazel-cache-${{ runner.os }}-
 
       - name: Build
-        run: bazel build //:client
+        run: bazel build //...
 
   # Template for future matrix builds
   # matrix-build:
